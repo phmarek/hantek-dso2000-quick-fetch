@@ -46,6 +46,8 @@ sub fetch_one
 	binmode(F);
 	sysread F, my $header, 128;
 
+	my $output = sprintf($file, time());
+
 	#print length($header), " ", unpack("H*", $header), "\n";
 
 	my ($head, $first_len, $total_len, $upl_len,
@@ -61,10 +63,11 @@ sub fetch_one
 	unpack('a2 a9a9a9 a1a1 a8 s1s1s1s1 a7a7a7a7 a1a1a1a1 a9 a6 x9 a9 a6 a10', $header);
 	# TODO: signed LE short not available? For the offsets.
 
-	#print " @a \n"; #exit; # pack
+	open(O, ">", $output) or die "Can't open '$output' for writing: $!\n";
+	#print O "# header: @a \n"; #exit; # pack
+
 	my @channels;
 	my @calc;
-
 	push @channels, [1,$v1+0, $off1] if $c1e;
 	push @channels, [2,$v2+0, $off2] if $c2e;
 	push @channels, [3,$v3+0, $off3] if $c3e;
@@ -83,15 +86,17 @@ sub fetch_one
 		$data_per_ch[$ch->[0]] .= $chunk;
 	}
 
-	my $output = sprintf($file, time());
-	open(O, ">", $output) or die "Can't open '$output' for writing: $!\n";
-
 	my @cols = qw(index time);
 	push @cols, map { "raw.CH"  . $_->[0] } @channels;
 	push @cols, map { "volt.CH" . $_->[0] } @channels;
 	print O join($sep, @cols),"\n";
 	# find smallest length
-	my ($max) = sort { $a <=> $b; } map { defined($_) ? length($_) : () } @data_per_ch;
+	my @lengths =  map { defined($_) ? length($_) : () } @data_per_ch;
+
+	# Because of padding to 4KB we need to take the real sample count.
+	push @lengths, $total_len/scalar(@channels);
+
+	my ($max) = sort { $a <=> $b; } @lengths;
 	for($i = 0; $i < $max; $i++) {
 		my @volt;
 		my @data;
