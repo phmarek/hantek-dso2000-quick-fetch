@@ -16,6 +16,7 @@
 #define CHANNEL_COUNT 4
 #define CHUNK_SIZE 2000
 #define HEADER_SIZE 128
+#define BUFFER_SIZE (4 * 1024 * 1024)
 
 char device_pattern[] = "/dev/disk/by-id/usb-Waveform_Dump*-0:0";
 
@@ -68,11 +69,18 @@ int translate_data(const uint8_t * const src_data, uint32_t src_len, const char 
 	float sample_rate;
 	const uint8_t *data;
 	const uint8_t *end;
-	char buffer[128];
 	FILE *output;
+	static char *buffer = NULL;
 
 	output = fopen(dest_name, "wt");
 	ERROR_IF(!output, "Can't open \"%s\" for writing: %d, %s\n", dest_name, errno, strerror(errno));
+
+	if (!buffer) {
+		buffer = malloc(BUFFER_SIZE);
+		ERROR_IF(!buffer, "Can't allocate output buffer");
+	}
+	i = setvbuf(output, buffer, _IOFBF, BUFFER_SIZE);
+	printf("setvbuf: %d\n", i);
 
 	/*
 	dest_fh = open(dest_name, O_CREAT | O_WRONLY | O_TRUNC, 0700);
