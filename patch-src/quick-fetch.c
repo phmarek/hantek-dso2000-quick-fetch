@@ -61,7 +61,8 @@ static uint32_t *scpi__data_sum_len = 0;
 
 
 
-const char tmp_file[80] = "/tmp/quick-fetch.bin";
+const char tmp_file[80] = "/tmp/quick-fetch.bin.tmp";
+const char result_file[80] = "/tmp/quick-fetch.bin";
 
 void do_save_waveform() {
 	int fd;
@@ -129,9 +130,12 @@ void do_save_waveform() {
 		r = close(fd);
 		DEBUG("close: %d\n", r);
 
+		r = rename(tmp_file, result_file);
+		DEBUG("rename: %d\n", r);
+
 		fd = open("/sys/kernel/config/usb_gadget/g1/functions/mass_storage.0/lun.0/file", O_WRONLY);
 		if (fd >= 0) {
-			write(fd, tmp_file, sizeof(tmp_file) -1);
+			write(fd, result_file, sizeof(result_file) -1);
 			close(fd);
 		}
 	}
