@@ -119,7 +119,7 @@ int translate_data(const uint8_t * const src_data, uint32_t src_len, const char 
 	sample_nr = 0;
 	while (data < end) {
 		for(i = 0; i < CHUNK_SIZE; i++) {
-			fprintf(output, "%d%s%f", sample_nr, sep, sample_nr / sample_rate);
+			fprintf(output, "%d%s%e", sample_nr, sep, sample_nr / sample_rate);
 
 			for (ch = 0; ch < CHANNEL_COUNT; ch++)
 				if (ch_data[ch].enabled) {
@@ -129,7 +129,7 @@ int translate_data(const uint8_t * const src_data, uint32_t src_len, const char 
 
 			for (ch = 0; ch < CHANNEL_COUNT; ch++)
 				if (ch_data[ch].enabled) {
-					fprintf(output, "%s%f", sep,
+					fprintf(output, "%s%e", sep,
 							(ch_data[ch].ival - ch_data[ch].offset) 
 							* ch_data[ch].scale
 							/ grid);
