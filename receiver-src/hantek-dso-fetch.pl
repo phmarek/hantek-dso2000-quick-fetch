@@ -74,18 +74,8 @@ sub fetch_one
 	push @channels, [4,$v4+0, $off4] if $c4e;
 
 	printf O "# CH%d: scale %f, offset %d\n", @$_ for @channels;
-
-	for (@channels) {
-		my ($idx, $scale, $off) = @$_;
-		push @$_, eval "sub { (\$_[0] - $off) / " . ($scale/$grid) . " }";
-	} 
 	
-
-	my @cols = qw(index time);
-	push @cols, map { "raw.CH"  . $_->[0] } @channels;
-	push @cols, map { "volt.CH" . $_->[0] } @channels;
-	print O join($sep, @cols),"\n";
-
+	my @data_per_ch = ();
 	while (1) {
 		my $read = sysread(F, my $chunk, 2000);
 		last if $read == 0;
@@ -95,6 +85,11 @@ sub fetch_one
 		push @channels, $ch;
 		$data_per_ch[$ch->[0]] .= $chunk;
 	}
+
+	my @cols = qw(index time);
+	push @cols, map { "raw.CH"  . $_->[0] } @channels;
+	push @cols, map { "volt.CH" . $_->[0] } @channels;
+	print O join($sep, @cols),"\n";
 	# find smallest length
 	my @lengths =  map { defined($_) ? length($_) : () } @data_per_ch;
 
@@ -106,11 +101,11 @@ sub fetch_one
 		my @volt;
 		my @data;
 		for $ch (@channels) {
-			my ($idx, $scale, $off, $cb) = @$ch;
+			my ($idx, $scale, $off) = @$ch;
 
-			my $byte = unpack("c", substr($data_per_ch[$idx], $i, 1));
+			my $byte = unpack("c", substr($data_per_ch[$idx], $i, 1)); 
 			push @data, $byte;
-			push @volt, &$cb($byte);
+			push @volt, AbsVolt($byte, $scale, $off);
 		}
 
 		print O join($sep, $i, $i/$sampling_rate, @data, @volt),"\n";
