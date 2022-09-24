@@ -16,4 +16,4 @@ send-tar-to-hantek:
 	sudo tar -cf /dev/disk/by-id/usb-Waveform_Dump*-0:0 quick-fetch.so
 
 sz:
-	SZ quick-fetch.so
+	sz -8 --verbose quick-fetch.so < /dev/ttyACM0 > /dev/ttyACM0

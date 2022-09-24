@@ -188,6 +188,7 @@ REQUIRES THAT THE "phoenix" BINARY IS PATCHED VIA "LD_PRELOAD"!
 Options:
 
   --continuous
+  --cont
      Don't stop but loop and wait for new data,
      dump it to a CSV immediately
 
@@ -195,8 +196,8 @@ Options:
      Pattern for a file name;
      for --continuous it should include "%d" to insert a timestamp
 
-  --device=/dev/sdb
-     Hantek DSO2000 USB block device, normally autodetected
+  --device=/dev/ttyACM0
+     Hantek DSO2000 USB serial device
 
   --sep=,
      Separator to use in output, normally tab
