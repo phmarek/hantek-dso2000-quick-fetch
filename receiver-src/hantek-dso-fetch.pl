@@ -1,6 +1,7 @@
 #!/usr/bin/perl
 
 use Getopt::Long;
+use Expect;
 
 my $debug = 0;
 my $file = "hantek-dso-output-%d.csv";
@@ -8,7 +9,7 @@ my $repeated = 0;
 my $sep = "\t";
 my $grid = 25; ## ?
 
-my $dev = glob("/dev/disk/by-id/usb-Waveform_Dump*-0:0");
+my $dev = "/dev/ttyACM0";
 
 GetOptions(
 	"cont|continuous|repeated|r" => \$repeated,
@@ -17,9 +18,9 @@ GetOptions(
 	"sep=s"   => \$sep,
 	"debug+"  => \$debug);
 
+my $expect = undef;
 
-my $disk = readlink($dev) or die "No Hantek Waveform Device found.\n";
-
+login();
 
 if ($repeated) {
 	open(MON, "udevadm monitor --kernel --subsystem-match=block/disk |") or die $!;
@@ -38,6 +39,36 @@ if ($repeated) {
 	fetch_one();
 }
 
+
+exit;
+
+sub login
+{
+	open($fh, "+<", $dev) or die "Can't open $dev\n";
+	binmode($fh);
+		my $pid = fork();
+		if ($pid == 0) {
+			open(STDIN, "<&", $fh) or die $!;
+			exec("stty","-echo");
+			die;
+			exit 1;
+		}
+		die "Can't fork" if !defined $pid;
+		waitpid($pid, 0);
+
+		#	syswrite($fh, "\n");
+		#	sysread($fh, $buf, 100) or die $!;
+		#	print $buf;
+		#	exit;
+	$expect = Expect->exp_init($fh);
+	$expect->raw_pty(1);
+	$expect->expect(1.0, "login:") or die;
+	$expect->send("root\r");
+	$expect->expect(1.0, '~$') or die;
+	$expect->send("export PS1='----'\r");
+	$expect->expect(1.0, '----') or die;
+	exit;
+}
 
 sub fetch_one
 {
