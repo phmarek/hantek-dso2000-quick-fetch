@@ -14,3 +14,6 @@ quick-fetch.so: quick-fetch.c
 
 send-tar-to-hantek:
 	sudo tar -cf /dev/disk/by-id/usb-Waveform_Dump*-0:0 quick-fetch.so
+
+sz:
+	SZ quick-fetch.so

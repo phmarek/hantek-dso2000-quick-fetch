@@ -7,7 +7,9 @@ my $debug = 0;
 my $file = "hantek-dso-output-%d.csv";
 my $repeated = 0;
 my $sep = "\t";
-my $grid = 25; ## ?
+
+my $grid = 25;
+my $chunk_size = 2000;
 
 my $dev = "/dev/ttyACM0";
 
@@ -16,27 +18,24 @@ GetOptions(
 	"file=s"   => \$file,
 	"device=s"   => \$dev,
 	"sep=s"   => \$sep,
-	"debug+"  => \$debug);
+	"debug+"  => \$debug) or die(<DATA>);
 
-my $expect = undef;
+# one remaining arguments may be the file pattern.
+$file = shift() if @ARGV == 1;
 
-login();
+
+our $fh = login();
 
 if ($repeated) {
-	open(MON, "udevadm monitor --kernel --subsystem-match=block/disk |") or die $!;
-
-	my ($blockdev) = $disk =~ m,/([^/]+?)$,;
-
 	$| = 1;
 	print "Multi-capture enabled. Waiting for data.\n";
-	while (<MON>) {
-		next unless m,^KERNEL.*/block/$blockdev \(block\)$,;
+	while (1) {
 		# In case there's a transmission problem, don't stop this loop!
-		eval fetch_one();
+		# TODO: re-open device
+		eval fetch_one($fh);
 	}
-	close MON;
 } else {
-	fetch_one();
+	fetch_one($fh);
 }
 
 
@@ -46,20 +45,28 @@ sub login
 {
 	open($fh, "+<", $dev) or die "Can't open $dev\n";
 	binmode($fh);
-		my $pid = fork();
-		if ($pid == 0) {
-			open(STDIN, "<&", $fh) or die $!;
-			exec("stty","-echo");
-			die;
-			exit 1;
-		}
-		die "Can't fork" if !defined $pid;
-		waitpid($pid, 0);
+	my $pid = fork();
+	if ($pid == 0) {
+		open(STDIN, "<&", $fh) or die $!;
+		exec("stty","-echo", "raw", "pass8");
+		die;
+		exit 1;
+	}
+	die "Can't fork" if !defined $pid;
+	waitpid($pid, 0) or die $!;
 
-		#	syswrite($fh, "\n");
-		#	sysread($fh, $buf, 100) or die $!;
-		#	print $buf;
-		#	exit;
+	# Empty serial buffer - the login process etc. might have been running
+
+	my $mask = "";
+	vec($mask, fileno($fh), 1) = 1;
+	sysread($fh, my $void, 4096) while select(my $r=$mask, undef, undef, 0);
+
+	return $fh;
+
+	#	syswrite($fh, "\n");
+	#	sysread($fh, $buf, 100) or die $!;
+	#	print $buf;
+	#	exit;
 	$expect = Expect->exp_init($fh);
 	$expect->raw_pty(1);
 	$expect->expect(1.0, "login:") or die;
@@ -72,10 +79,11 @@ sub login
 
 sub fetch_one
 {
+	my($fh) = @_;
+	read $fh, my $header, 128;
 
-	open(F, "<", $dev) or die "can't open $dev: $!\n";
-	binmode(F);
-	sysread F, my $header, 128;
+	local $SIG{ALRM} = sub { die "alarm\n" };
+	alarm(60);
 
 	my $output = sprintf($file, time());
 
@@ -94,6 +102,8 @@ sub fetch_one
 	unpack('a2 a9a9a9 a1a1 a8 s1s1s1s1 a7a7a7a7 a1a1a1a1 a9 a6 x9 a9 a6 a10', $header);
 	# TODO: signed LE short not available? For the offsets.
 
+	die "Wrong magic: $header" unless $head eq '#9';
+
 	open(O, ">", $output) or die "Can't open '$output' for writing: $!\n";
 	#print O "# header: @a \n"; #exit; # pack
 
@@ -105,36 +115,44 @@ sub fetch_one
 	push @channels, [4,$v4+0, $off4] if $c4e;
 
 	printf O "# CH%d: scale %f, offset %d\n", @$_ for @channels;
-	
-	my @data_per_ch = ();
-	while (1) {
-		my $read = sysread(F, my $chunk, 2000);
-		last if $read == 0;
-		die "error reading: $!" if !defined($read);
 
-		my $ch = shift(@channels);
-		push @channels, $ch;
-		$data_per_ch[$ch->[0]] .= $chunk;
-	}
+	# Because of padding to 4KB we need to take the real sample count.
+	my ($max) = $total_len/scalar(@channels);
+
+	printf "Fetching %d channels with %d samples into $output... ",
+		scalar(@channels), $max;
 
 	my @cols = qw(index time);
 	push @cols, map { "raw.CH"  . $_->[0] } @channels;
 	push @cols, map { "volt.CH" . $_->[0] } @channels;
 	print O join($sep, @cols),"\n";
 	# find smallest length
-	my @lengths =  map { defined($_) ? length($_) : () } @data_per_ch;
 
-	# Because of padding to 4KB we need to take the real sample count.
-	push @lengths, $total_len/scalar(@channels);
+	my $bytes_processed = 0;
+	my $chunk_start = 0;
+	for(my $i = 0; $i < $max; $i++) {
 
-	my ($max) = sort { $a <=> $b; } @lengths;
-	for($i = 0; $i < $max; $i++) {
+		if ($i == $chunk_start) {
+			# Fetch a set of data chunks
+			for my $ch (@channels) {
+				# timeout handling!!
+				my $read = read($fh, my $chunk, $chunk_size);
+				last if $read == 0;
+				die "error reading: $!" if !defined($read);
+				# printf "=== got %d bytes for %d\n", $read, $ch->[0];
+
+				$bytes_processed += $read;
+				$ch->[3] = $chunk;
+			}
+			$chunk_start += $chunk_size;
+		}
+
 		my @volt;
 		my @data;
-		for $ch (@channels) {
-			my ($idx, $scale, $off) = @$ch;
+		for my $ch (@channels) {
+			my ($idx, $scale, $off, $data) = @$ch;
 
-			my $byte = unpack("c", substr($data_per_ch[$idx], $i, 1)); 
+			my $byte = unpack("c", substr($data, $i-$chunk_start, 1)); 
 			push @data, $byte;
 			push @volt, AbsVolt($byte, $scale, $off);
 		}
@@ -145,8 +163,7 @@ sub fetch_one
 	close O;
 	close F;
 
-	printf "Fetched %d channels with %d samples into $file.\a\n",
-		scalar(@channels), $max;
+	printf "Done! $bytes_processed bytes.\a\n";
 }
 
 sub AbsVolt

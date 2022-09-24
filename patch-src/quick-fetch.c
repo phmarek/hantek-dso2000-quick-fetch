@@ -2,6 +2,10 @@
 
 #define _GNU_SOURCE
 #include <stdio.h>
+#include <sys/select.h>
+#include <sys/types.h>
+#include <dirent.h>
+#include <errno.h>
 #include <errno.h>
 #include <dlfcn.h>
 #include <signal.h>
@@ -11,10 +15,21 @@
 #include <time.h>
 #include <unistd.h>
 #include <stdint.h>
+//#include <zlib.h> // compress2
 
-void *(fetch_data)(void *x);
+
+/* Press the key so often in so many seconds to get out of quick mode,
+ * ie. to get the USB console back. */
+#define QUICK_FETCH_DEACT_TIMEOUT 2
+#define QUICK_FETCH_DEACT_COUNT 3
+
+/* TODO: tuneable because of overclocking? */
+#define QUICK_FETCH_TOTAL_TIMEOUT 30
+
+#define QUICK_FETCH_PER_PACKET_TIMEOUT 0.5
+
 // #define DEBUG (void)
-#define DEBUG(fmt, ...) printf("%d" fmt, getpid(), ## __VA_ARGS__)
+#define DEBUG(fmt, ...) printf("%d:" fmt, getpid(), ## __VA_ARGS__)
 
 struct io_funcs {
 	void *void1;
@@ -23,30 +38,66 @@ struct io_funcs {
 } __attribute__((packed));
 
 struct connection {
-	char pad1[44];
+	uint32_t pad1[11];
 	struct io_funcs *io_funcs;
 	uint32_t write_count;
-	char pad2[32];
-	uint32_t fd;
-	uint32_t repeated_write;
+	uint32_t pad2[8];
+
+	uint32_t fd __attribute__ ((aligned (8)));
+	uint32_t my_write_counter;
+	time_t start_time;
+	uint32_t is_timeout;
+	fd_set select_mask;
+	struct timeval timeout;
+	uint32_t was_empty_transmission;
 } __attribute__((packed)) ;
 
 
 int my_write_fn(struct connection *conn, char *buf, uint32_t len) {
-//	Single-byte writes for a comma?
-	if (len == 1)
-		return 1;
-//	if (buf == scpi__ignore_write)
-//		return 1;
+	int i;
+	time_t now;
 
+	if (conn->is_timeout)
+		return len;
+
+//	Single-byte writes for a comma? Perhaps some SCPI start signal?
+	if (len == 1)
+		return len;
+
+	if (len == 11 && memcmp(buf, "#9000000000", 11) == 0) {
+		DEBUG("empty packet.\n");
+		conn->was_empty_transmission = 1;
+		return len;
+	}
 
 	// Ignore repeated SCPI header
-	if (len == 4128 && conn->repeated_write) {
+	if (len == 4128 && conn->my_write_counter) {
 		len -= 128;
 		buf += 128;
 	}
 
-	conn->repeated_write = 1;
+	conn->my_write_counter += len;
+
+	/* Timeout handling -- if the receiver crashes or just does not exist, we stop transmitting. */
+	FD_SET(conn->fd, &conn->select_mask);
+	conn->timeout.tv_sec = (int)(QUICK_FETCH_PER_PACKET_TIMEOUT);
+	conn->timeout.tv_usec = (int)(QUICK_FETCH_PER_PACKET_TIMEOUT * 1000000) % 1000000;
+	i = select(conn->fd+1, NULL, &conn->select_mask, NULL, &conn->timeout);
+	if (!i) {
+		DEBUG("Plain timeout, left %d.%06d.\n", conn->timeout.tv_sec, conn->timeout.tv_usec);
+		conn->is_timeout = 1;
+	}
+
+	/* We expect the max. 8MSamples to be transferred in ~15 seconds; */
+	time(&now);
+	i = now - conn->start_time;
+	if (i > QUICK_FETCH_TOTAL_TIMEOUT) {
+		DEBUG("timeout over total data.\n");
+		conn->is_timeout = 2;
+	}
+
+	if (conn->is_timeout)
+		return len; // Abort!
 
 //	DEBUG(" called for writing: %p, %p, %d\n", conn, buf, len);
 	return write(conn->fd, buf, len);
@@ -60,9 +111,91 @@ static uint32_t *scpi__data_all_len = 0;
 static uint32_t *scpi__data_sum_len = 0;
 
 
+static int console_is_stopped = 0;
+static int communication_fd = -1;
 
-const char tmp_file[80] = "/tmp/quick-fetch.bin.tmp";
-const char result_file[80] = "/tmp/quick-fetch.bin";
+const char communication_port[] = "/dev/ttyGS0";
+
+const char init_msg[] = "INIT\n";
+const char dump_msg[] = "DUMP\n";
+
+int is_process_using_device(pid_t pid, const char dev[])
+{
+	char buffer[80];
+	DIR * fds;
+	struct dirent *de;
+	int ret;
+
+	sprintf(buffer, "/proc/%u/fd/", pid);
+	fds = opendir(buffer);
+	if (fds) {
+		while (1) {
+			de = readdir(fds);
+			if (!de) break;
+
+			sprintf(buffer, "/proc/%u/fd/%s", pid, de->d_name);
+			ret = readlink(buffer, buffer, sizeof(buffer)-1);
+			if (ret >= 0) {
+				buffer[ret] = 0;
+//				DEBUG("pid %u fd %s is %s \n", pid, de->d_name, buffer);
+				if (strcmp(buffer, dev) == 0) {
+					closedir(fds);
+					return 1;
+				}
+			}
+		}
+		closedir(fds);
+	}
+
+	/* May already have been gone again */
+	return 0;
+}
+
+
+/* ttyACM0 / ttyGS0 doesn't seem to have any out-of-band signalling functions;
+ * ie. if the PC closes ttyACM0, the DSO doesn't see an EOF on ttyGS0.
+ *
+ * So, to avoid messing with the USB console,
+ * on activation of the quick fetch module we SIGSTOP any processes using ttyGS0;
+ * and, by pressing the key a few times in quick succession, the user can
+ * re-enable the processes to make the USB console usable again. */
+int send_signal_to_console_processes(const char dev[], int signal) {
+	DIR * processes;
+	int count;
+	int pid;
+	struct dirent *de;
+
+	count = 0;
+	processes = opendir("/proc/");
+	if (processes) {
+		while (1) {
+			de = readdir(processes);
+			if (!de) break;
+
+			if (de->d_type != DT_DIR)
+				continue;
+
+			/* Is that a process directory? */
+			pid = atoi(de->d_name);
+			if (!pid)
+				continue;
+			if (pid == getpid())
+				continue;
+
+//			DEBUG("process %d\n", pid);
+			if (is_process_using_device(pid, dev)) {
+				count++;
+				DEBUG("sending signal %d to %d\n", signal, pid);
+				kill(pid, signal);
+			}
+		}
+		closedir(processes);
+	}
+
+	return count;
+}
+
+
 
 void do_save_waveform() {
 	int fd;
@@ -75,34 +208,35 @@ void do_save_waveform() {
 	struct connection c = { 
 		.io_funcs = &ios, 
 		.write_count = 1,
-		.repeated_write = 0,
+		.my_write_counter = 0,
 	};
+	time(&c.start_time);
+	FD_ZERO(&c.select_mask);
 
 	/* TODO: Put a "gzip" inbetween?
 	 * Seems unnecessary, the USB file transfer mode does 8MB in <2secs */
 
 	data = (void*)0x000e5000;
 	len  = 0x00b0d000 - (uint32_t)data;
-	fd = open( tmp_file, O_CREAT | O_TRUNC | O_WRONLY, 0644);
-	if (fd >= 0) {
-		/*
-		r = ftruncate(fd, 32*1024*1024);
-		DEBUG("truncate: %d\n", r);
-
-		time(&t);
-		r = pwrite(fd, &t, sizeof(t), 0);
-		DEBUG("write 1: %d\n", r);
-		r = pwrite(fd, data, len, 0x1000);
-		DEBUG("write 2: %d\n", r);
-		*/
+	fd = communication_fd;
+	if (fd == -1) {
+		DEBUG("No communication open!?!?!");
+	} else if (fd >= 0) {
+//		write(fd, dump_msg, strlen(dump_msg));
 
 		c.fd = fd;
 		*scpi__priv_wave_state = 1;
 		i = 4;
 		end = 0;
+		DEBUG(" state %d; all %u, sum %u\n", *scpi__priv_wave_state, *scpi__data_all_len, *scpi__data_sum_len);
 		do {
 //			DEBUG("calling %d: state %x\n", i, *scpi__priv_wave_state);
-			r = scpi__priv_wave_d_all(&c);
+			do {
+				c.was_empty_transmission = 0;
+				r = scpi__priv_wave_d_all(&c);
+			}
+			while (c.was_empty_transmission);
+
 			if ((*scpi__data_sum_len + 4000) == *scpi__data_all_len)
 				end = 1;
 			/*
@@ -117,34 +251,62 @@ void do_save_waveform() {
 				break;
 		} while (!(end && i==0));
 
-		/* Pad to full 4KB block */
-		len = ((*scpi__data_all_len) | (4*1024 -1)) +1;
-		ftruncate(fd, len);
-
-
 		/*
 		r = scpi__priv_wave_d_all(&c);
 		DEBUG(" after: got result %p, state %d\n", r, *scpi__priv_wave_state);
 		*/
 
-		r = close(fd);
+//		r = close(fd);
 		DEBUG("close: %d\n", r);
-
-		r = rename(tmp_file, result_file);
-		DEBUG("rename: %d\n", r);
-
-		fd = open("/sys/kernel/config/usb_gadget/g1/functions/mass_storage.0/lun.0/file", O_WRONLY);
-		if (fd >= 0) {
-			write(fd, result_file, sizeof(result_file) -1);
-			close(fd);
-		}
 	}
 }
 
 int new_save_to_usb(void *x)
 {
-	do_save_waveform();
-	return 0;
+	static time_t pressed_time;
+	static int pressed_count = 0;
+
+	struct timespec now;
+	/* Not unlikely that someone/something sets the wall clock time;
+	 * then time() would be wrong. */
+	clock_gettime(CLOCK_MONOTONIC, &now);
+
+	if (console_is_stopped) {
+		DEBUG("key: old time %ld, now %ld, count %d\n", pressed_time, now.tv_sec, pressed_count);
+		/* Does the user want the USB console back? */
+		if (pressed_time + QUICK_FETCH_DEACT_TIMEOUT >= now.tv_sec) {
+			pressed_count++;
+			if (pressed_count >= QUICK_FETCH_DEACT_COUNT) {
+				DEBUG("leaving quick fetch mode\n");
+				/* Kill the processes hard - init will restart a clean getty. */
+				send_signal_to_console_processes(communication_port, SIGKILL);
+				console_is_stopped = 0;
+				if (communication_fd >= 0)
+					close(communication_fd);
+				communication_fd = -1;
+			}
+			return 0;
+		} else {
+			/* First click after some time; get a dump. */
+			DEBUG("quick fetch do at %ld\n", now.tv_sec);
+			pressed_time = now.tv_sec;
+			pressed_count = 0;
+			do_save_waveform();
+		}
+	} else {
+		/* Console is active; stop it (so that it doesn't get restarted by init) and ... */
+		DEBUG("activating quick fetch mode\n");
+		send_signal_to_console_processes(communication_port, SIGSTOP);
+		console_is_stopped = 1;
+		pressed_time = now.tv_sec;
+
+		communication_fd = open(communication_port, O_RDWR);
+//		write(communication_fd, init_msg, strlen(init_msg));
+		/* TODO: start thread that waits for commands ?! */
+		/* TODO: Message to screen saying now active */
+	}
+
+	return 1;
 
 	/* Using a fresh process would be nice,
 	 * to _not_ disturb the real process.
@@ -278,6 +440,9 @@ void my_patch_init(int version) {
 	}
 	close(fh);
 	did_patch = 1;
+
+	/* Cleanup old USB console processes */
+	send_signal_to_console_processes(communication_port, SIGKILL);
 
 	signal(SIGPOLL, (void*)do_save_waveform);
 	/* Auto reap children */
