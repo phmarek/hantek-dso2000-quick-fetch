@@ -53,6 +53,12 @@ struct connection {
 } __attribute__((packed)) ;
 
 
+extern uint32_t anolis_make_toast(const char msg[]);
+void show_some_alert(const char msg[]) {
+	anolis_make_toast(msg);
+}
+
+
 int my_write_fn(struct connection *conn, char *buf, uint32_t len) {
 	int i;
 	time_t now;
@@ -86,6 +92,7 @@ int my_write_fn(struct connection *conn, char *buf, uint32_t len) {
 	if (!i) {
 		DEBUG("Plain timeout, left %d.%06d.\n", conn->timeout.tv_sec, conn->timeout.tv_usec);
 		conn->is_timeout = 1;
+		show_some_alert("Timeout (1) sending data to Quick Fetch software.");
 	}
 
 	/* We expect the max. 8MSamples to be transferred in ~15 seconds; */
@@ -94,6 +101,7 @@ int my_write_fn(struct connection *conn, char *buf, uint32_t len) {
 	if (i > QUICK_FETCH_TOTAL_TIMEOUT) {
 		DEBUG("timeout over total data.\n");
 		conn->is_timeout = 2;
+		show_some_alert("Timeout (2) sending data to Quick Fetch software.");
 	}
 
 	if (conn->is_timeout)
@@ -109,6 +117,7 @@ static uint32_t (*scpi__priv_wave_d_all)(struct connection*) = 0;
 static uint32_t *scpi__priv_wave_state = 0;
 static uint32_t *scpi__data_all_len = 0;
 static uint32_t *scpi__data_sum_len = 0;
+
 
 
 static int console_is_stopped = 0;
@@ -194,7 +203,6 @@ int send_signal_to_console_processes(const char dev[], int signal) {
 
 	return count;
 }
-
 
 
 void do_save_waveform() {
@@ -284,6 +292,7 @@ int new_save_to_usb(void *x)
 				if (communication_fd >= 0)
 					close(communication_fd);
 				communication_fd = -1;
+				show_some_alert("Leaving quick fetch mode.");
 			}
 			return 0;
 		} else {
@@ -296,6 +305,7 @@ int new_save_to_usb(void *x)
 	} else {
 		/* Console is active; stop it (so that it doesn't get restarted by init) and ... */
 		DEBUG("activating quick fetch mode\n");
+		show_some_alert("Activating quick fetch mode.");
 		send_signal_to_console_processes(communication_port, SIGSTOP);
 		console_is_stopped = 1;
 		pressed_time = now.tv_sec;
@@ -384,6 +394,8 @@ int detect()
 	buffer[i] = 0;
 	if (strcmp(buffer, "/dso/app/phoenix") != 0) {
 //		DEBUG("wrong exe: %s\n", buffer);
+		show_some_alert("This firmware version is not supported "
+				"by the quick fetch patch.");
 		return 0;
 	}
 
@@ -409,6 +421,7 @@ int detect()
 		scpi__data_all_len    = (void*)0x9aed64;
 		scpi__data_sum_len    = (void*)0x9a6444;
 //		scpi__ignore_write    = (void*)0xab06c;
+
 		return 1;
 	}
 

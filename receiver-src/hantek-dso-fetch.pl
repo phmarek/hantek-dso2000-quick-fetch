@@ -80,10 +80,12 @@ sub login
 sub fetch_one
 {
 	my($fh) = @_;
+
+	# This waits for the DSO - so we must not timeout here.
 	read $fh, my $header, 128;
 
 	local $SIG{ALRM} = sub { die "alarm\n" };
-	alarm(60);
+	alarm(1);
 
 	my $output = sprintf($file, time());
 
@@ -119,7 +121,8 @@ sub fetch_one
 	# Because of padding to 4KB we need to take the real sample count.
 	my ($max) = $total_len/scalar(@channels);
 
-	printf "Fetching %d channels with %d samples into $output... ",
+	# A space before the dots so the filename can be copy/pasted as a <cword>.
+	printf "Fetching %d channels with %d samples into $output ... ",
 		scalar(@channels), $max;
 
 	my @cols = qw(index time);
@@ -135,7 +138,7 @@ sub fetch_one
 		if ($i == $chunk_start) {
 			# Fetch a set of data chunks
 			for my $ch (@channels) {
-				# timeout handling!!
+				alarm(1);
 				my $read = read($fh, my $chunk, $chunk_size);
 				last if $read == 0;
 				die "error reading: $!" if !defined($read);
@@ -164,6 +167,7 @@ sub fetch_one
 	close F;
 
 	printf "Done! $bytes_processed bytes.\a\n";
+	alarm(0);
 }
 
 sub AbsVolt
