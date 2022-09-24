@@ -1,6 +1,6 @@
 # Quick Data fetch from Hantek DSO 2000 series using a firmware patch
 
-The Hantek DSO 2000 series provides a convenient SCPI interface; sadly using that to fetch data is [rather slow.][https://github.com/phmarek/hantek-dso2000], with 2 channels at 4MSamples taking (measured!) 300 seconds - mostly because of USB latency for each 4KB packet.
+The Hantek DSO 2000 series provides a convenient SCPI interface; sadly using that to fetch data is [rather slow.](https://github.com/phmarek/hantek-dso2000), with 2 channels at 4MSamples taking (measured!) 300 seconds - mostly because of USB latency for each 4KB packet.
 
 Here is a C file that compiles to a shared library which, if `LD_PRELOAD`ed to the binary (see below), provides a faster (and easier) way to fetch data -- just connect the script and press the `SAVE TO USB` button!
 
@@ -45,7 +45,7 @@ The header lines are optimized for `R`.
 
 ### Sample graphing
 
-Here's an 2 x 400 KSamples example using [`gnuplot`][http://www.gnuplot.info/]:
+Here's an 2 x 400 KSamples example using [`gnuplot`](http://www.gnuplot.info/):
 ```
 F=/tmp/test-1664046008.csv # specify your file here 
 gnuplot -p -e " plot '$F' using 2:3 with lines title 'CH1', '$F' using 2:4 with lines title 'CH2'"
@@ -74,7 +74,7 @@ You need a cross-compiler for ARM (see below); switch to the `patch-src/` direct
 
 ## Transfer of the library to the DSO
 
-You need [a USB console][https://drive.google.com/drive/folders/1B5mgsuO5OvIwT3gi_5n9HC6r_BxRoCuF] (Thanks, David!!); then, by (temporarily) disabling the serial console via `killall -STOP getty`, run
+You need [a USB console](https://drive.google.com/drive/folders/1B5mgsuO5OvIwT3gi_5n9HC6r_BxRoCuF) (Thanks, David!!); then, by (temporarily) disabling the serial console via `killall -STOP getty`, run
 
 ```
 cd /root
@@ -105,3 +105,10 @@ deb [ arch=armel check-valid-until=no  ] https://snapshot.debian.org/archive/deb
 ```
 
 and install `gcc-9-cross-base=9.5.0-1cross1`, `libc6-armel-cross=2.33-1cross1`,  `libc6-dev-armel-cross=2.33-1cross1`.
+
+
+## More information
+
+A previous version used the USB storage interface for transferring data; but that precluded using the USB console, and had a longer latency because the data needed full preparation on the DSO before being transferred to the PC.
+
+The current solution just does the DSO and local CSV printing in parallel and is therefore faster.
