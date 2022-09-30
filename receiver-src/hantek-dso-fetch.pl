@@ -12,10 +12,13 @@ my $grid = 25;
 my $chunk_size = 2000;
 
 my $dev = "/dev/ttyACM0";
+my $env = "RECEIVED_HANTEK_FILE";
+my $run = undef;
 
 GetOptions(
 	"cont|continuous|repeated|r" => \$repeated,
 	"file=s"   => \$file,
+	"run=s"   => \$run,
 	"device=s"   => \$dev,
 	"sep=s"   => \$sep,
 	"debug+"  => \$debug) or die(<DATA>);
@@ -28,6 +31,7 @@ our $fh = login();
 
 if ($repeated) {
 	$| = 1;
+	# $SIG{"CHLD"} = "IGNORE";
 	print "Multi-capture enabled. Waiting for data.\n";
 	while (1) {
 		# In case there's a transmission problem, don't stop this loop!
@@ -162,12 +166,30 @@ sub fetch_one
 
 		print O join($sep, $i, $i/$sampling_rate, @data, @volt),"\n";
 	}
+	alarm(0);
 
 	close O;
 	close F;
 
-	printf "Done! $bytes_processed bytes.\a\n";
-	alarm(0);
+	my $chld;
+
+	if ($run) {
+		my $pid = fork();
+		die "Can't fork: $!" unless defined($pid);
+		if ($pid) {
+			open(STDIN, "< /dev/null") or die $!;
+			# TODO: reset STDOUT and STDERR as well?
+			# Would need to remember STDERR for the error message below, though.
+			
+			system($run);
+			die "Hantek quick fetch: error running shell command: $?" if $?;
+			exit;
+		}
+
+		$chld = ", spawned child $pid";
+	}
+
+	printf "Done! $bytes_processed bytes$chld.\a\n";
 }
 
 sub AbsVolt
@@ -187,11 +209,6 @@ REQUIRES THAT THE "phoenix" BINARY IS PATCHED VIA "LD_PRELOAD"!
 
 Options:
 
-  --continuous
-  --cont
-     Don't stop but loop and wait for new data,
-     dump it to a CSV immediately
-
   --file=my-file-name-%d.csv
      Pattern for a file name;
      for --continuous it should include "%d" to insert a timestamp
@@ -201,3 +218,14 @@ Options:
 
   --sep=,
      Separator to use in output, normally tab
+
+  --continuous
+  --cont
+     Don't stop but loop and wait for new data,
+     dump it to a CSV immediately
+
+  --run=
+     Specifies a shell command that is run in the background
+     after receiving a new data file in continuous mode;
+     the current file name is available as environment
+     variable RECEIVED_HANTEK_FILE.
