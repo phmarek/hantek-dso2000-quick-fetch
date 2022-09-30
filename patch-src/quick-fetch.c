@@ -394,8 +394,6 @@ int detect()
 	buffer[i] = 0;
 	if (strcmp(buffer, "/dso/app/phoenix") != 0) {
 //		DEBUG("wrong exe: %s\n", buffer);
-		show_some_alert("This firmware version is not supported "
-				"by the quick fetch patch.");
 		return 0;
 	}
 
@@ -465,14 +463,22 @@ void my_patch_init(int version) {
 }
 
 
-void __attribute__((constructor)) my_init() 
+void detect_and_patch()
 {
 	int i;
 
 	i = detect();
-	if (!i)
+	if (!i) {
+		show_some_alert("This firmware version is not supported "
+				"by the quick fetch patch.");
 		return;
+	}
 
 	my_patch_init(i);
+	show_some_alert("Quick-fetch patch active");
 }
 
+void __attribute__((constructor)) my_init()  {
+	signal(SIGALRM, (sighandler_t)detect_and_patch);
+	alarm(5);
+}
