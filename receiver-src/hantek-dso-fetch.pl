@@ -9,7 +9,7 @@ my $repeated = 0;
 my $sep = "\t";
 
 my $grid = 25;
-my $chunk_size = 2000;
+my $block_size = 4000;
 
 my $dev = "/dev/ttyACM0";
 my $env = "RECEIVED_HANTEK_FILE";
@@ -127,7 +127,7 @@ sub fetch_one
 
 	# A space before the dots so the filename can be copy/pasted as a <cword>.
 	printf "Fetching %d channels with %d samples into $output ... ",
-		scalar(@channels), $max;
+	scalar(@channels), $max;
 
 	my @cols = qw(index time);
 	push @cols, map { "raw.CH"  . $_->[0] } @channels;
@@ -135,6 +135,7 @@ sub fetch_one
 	print O join($sep, @cols),"\n";
 	# find smallest length
 
+	my $chunk_size = $block_size / scalar(@channels);
 	my $bytes_processed = 0;
 	my $chunk_start = 0;
 	for(my $i = 0; $i < $max; $i++) {
