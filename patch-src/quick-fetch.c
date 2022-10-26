@@ -350,7 +350,9 @@ static int did_patch = 0;
 
 int patch_a_jump(int fh, void* my_addr, uint32_t patch_addr)
 {
-	int32_t diff;
+	int64_t dist;
+	uint32_t jmp_val;
+	uint32_t jmp;
 	uint8_t *ptr = (void*)patch_addr;
 	int i;
 
@@ -359,20 +361,21 @@ int patch_a_jump(int fh, void* my_addr, uint32_t patch_addr)
 	 * + 4                  (IP increment)
 	 * */
 
-	diff = ((unsigned long)my_addr - 4 - (patch_addr + 4)) / 4;
-	DEBUG("fh %d, from %p jump to %p, diff 0x%x\n", fh, patch_addr, my_addr, diff);
+	dist = ((unsigned long)my_addr - 4 - (patch_addr + 4));
+	jmp_val = (unsigned long)dist / 4;
+	DEBUG("fh %d, from %p jump to %p, dist 0x%x, jmp 0x%x\n", fh, patch_addr, my_addr, dist, jmp_val);
 
-	if (diff >= 0x800000 || diff < -0x800000) {
+	if (abs(dist) >= 0x7fff00) {
 		DEBUG("distance too big\n");
 		return 0;
 	}
 
 	// "b", ie. branch always == 0xea
-	diff = (diff & 0xffffff) | 0xea000000;
+	jmp = (jmp_val & 0xffffff) | 0xea000000;
 
-	i = pwrite64(fh, &diff, 4, (uint64_t)patch_addr);
+	i = pwrite64(fh, &jmp, 4, (uint64_t)patch_addr);
 	DEBUG("wrote %d = 0x%x: now 0x%x 0x%x 0x%x 0x%x\n",
-			i, diff,
+			i, jmp,
 			ptr[0],
 			ptr[1],
 			ptr[2],
