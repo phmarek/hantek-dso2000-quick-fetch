@@ -457,6 +457,19 @@ void my_patch_init(int version) {
 			patch_a_jump(fh, (void*)0x93e70, 0x93e60);
 			patch_a_jump(fh, (void*)0x93ad8, 0x93acc);
 			patch_a_jump(fh, (void*)0x93b20, 0x93b08);
+
+			/* Patch slowdown during LWF file write to USB stick
+			 *   0006a03c 5e c1 fe eb    bl   <EXTERNAL>::fwrite                               size_t fwrite(void * __ptr, size
+			 *   0006a040 2c 01 9f e5    ldr  out_file=>DAT_000c5f54,[PTR_DAT_0006a174]        = 000c5f54
+			 *                                                                                 = 73h    s
+			 *   0006a044 5e bf fe eb    bl   <EXTERNAL>::system                               int system(char * __command)
+			 *   0006a048 fa 0f a0 e3    mov  out_file,#0x3e8
+			 *   0006a04c 09 80 88 e0    add  r8,r8,r9
+			 *   0006a050 a1 c1 fe eb    bl   <EXTERNAL>::usleep                               int usleep(__useconds_t __usecon
+			 *   0006a054 ee ff ff ea    b    LAB_0006a014
+			 */
+			patch_a_jump(fh, (void*)0x6a014, 0x6a054);
+
 			break;
 	}
 	close(fh);
