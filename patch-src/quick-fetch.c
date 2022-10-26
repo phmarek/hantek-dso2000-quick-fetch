@@ -54,6 +54,7 @@ struct connection {
 } __attribute__((packed)) ;
 
 
+int global_debug = 0;
 extern uint32_t anolis_make_toast(const char msg[]);
 void show_some_alert(const char msg[]) {
 	anolis_make_toast(msg);
@@ -91,7 +92,7 @@ int my_write_fn(struct connection *conn, char *buf, uint32_t len) {
 	conn->timeout.tv_usec = (int)(QUICK_FETCH_PER_PACKET_TIMEOUT * 1000000) % 1000000;
 	i = select(conn->fd+1, NULL, &conn->select_mask, NULL, &conn->timeout);
 	if (!i) {
-		DEBUG("Plain timeout, left %d.%06d.\n", conn->timeout.tv_sec, conn->timeout.tv_usec);
+		DEBUG("Plain timeout, left %ld.%06ld.\n", conn->timeout.tv_sec, conn->timeout.tv_usec);
 		conn->is_timeout = 1;
 		show_some_alert("Timeout (1) sending data to Quick Fetch software.");
 	}
@@ -108,7 +109,8 @@ int my_write_fn(struct connection *conn, char *buf, uint32_t len) {
 	if (conn->is_timeout)
 		return len; // Abort!
 
-//	DEBUG(" called for writing: %p, %p, %d\n", conn, buf, len);
+	if(global_debug)
+		DEBUG(" called for writing: %p, %p, %d\n", conn, buf, len);
 	return write(conn->fd, buf, len);
 }
 
@@ -430,6 +432,11 @@ int detect()
 }
 
 
+void switch_debug_output(int x)
+{
+	global_debug = 1- global_debug;
+}
+
 
 void my_patch_init(int version) {
 	int fh;
@@ -461,6 +468,7 @@ void my_patch_init(int version) {
 	signal(SIGPOLL, (void*)do_save_waveform);
 	/* Auto reap children */
 	signal(SIGCHLD, SIG_DFL);
+	signal(SIGUSR2, switch_debug_output);
 
 	return;
 }
