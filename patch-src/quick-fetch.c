@@ -379,9 +379,10 @@ int patch_a_jump(int fh, void* my_addr, uint32_t patch_addr)
 
 	dist = ((unsigned long)my_addr - 4 - (patch_addr + 4));
 	jmp_val = (unsigned long)dist / 4;
-	DEBUG("fh %d, from %p jump to %p, dist 0x%x, jmp 0x%x\n", fh, patch_addr, my_addr, dist, jmp_val);
+	DEBUG("fh %d, from %p jump to %p, dist 0x%llx, jmp 0x%x\n",
+			fh, patch_addr, my_addr, dist, jmp_val);
 
-	if (abs(dist) >= 0x7fff00) {
+	if (abs(dist) >= 0x7fff00*4) {
 		DEBUG("distance too big\n");
 		return 0;
 	}
