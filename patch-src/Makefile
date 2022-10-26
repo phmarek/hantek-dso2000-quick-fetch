@@ -2,7 +2,7 @@
 #CFLAGS += -g -D_LARGEFILE_SOURCE=1 -D_LARGEFILE64_SOURCE=1
 #LDFLAGS += -g -ldl
 CFLAGS += -D_LARGEFILE_SOURCE=1 -D_LARGEFILE64_SOURCE=1
-LDFLAGS += -ldl
+LDFLAGS += -ldl -lpthread
 
 CC:=arm-linux-gnueabi-gcc-9
 

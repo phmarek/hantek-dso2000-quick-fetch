@@ -3,9 +3,10 @@
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <sys/select.h>
+#include <sys/syscall.h>      /* Definition of SYS_* constants */
+#include <pthread.h>
 #include <sys/types.h>
 #include <dirent.h>
-#include <errno.h>
 #include <errno.h>
 #include <dlfcn.h>
 #include <signal.h>
@@ -423,6 +424,8 @@ int detect()
 		return 1;
 	}
 
+	show_some_alert("This firmware version is not supported "
+			"by the quick fetch patch.");
 	return 0;
 }
 
@@ -463,22 +466,26 @@ void my_patch_init(int version) {
 }
 
 
-void detect_and_patch()
+void *detect_and_patch(void * ignore)
 {
 	int i;
 
+	// Wait until hardware got initialized, to not interfere.
+	sleep(8);
 	i = detect();
-	if (!i) {
-		show_some_alert("This firmware version is not supported "
-				"by the quick fetch patch.");
-		return;
-	}
+	if (i) {
 
-	my_patch_init(i);
-	show_some_alert("Quick-fetch patch active");
+		my_patch_init(i);
+		//show_some_alert("Quick-fetch patch active");
+	}
+	return NULL;
 }
 
 void __attribute__((constructor)) my_init()  {
-	signal(SIGALRM, (sighandler_t)detect_and_patch);
-	alarm(5);
+	pthread_t thr;
+	if (0 == pthread_create(&thr, NULL, detect_and_patch, NULL)) {
+		pthread_detach(thr);
+	}
 }
+
+/* vim: set ts=4 sw=4 noet  : */
