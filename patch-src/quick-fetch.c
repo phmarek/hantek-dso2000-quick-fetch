@@ -29,8 +29,12 @@
 
 #define QUICK_FETCH_PER_PACKET_TIMEOUT 0.5
 
+
+// using gettid() means that GLIBC2.30 is required, which Hantek's libc6 doesn't provide
+#define my_gettid(x) ((int)syscall(SYS_gettid))
+
 // #define DEBUG (void)
-#define DEBUG(fmt, ...) printf("%d:" fmt, getpid(), ## __VA_ARGS__)
+#define DEBUG(fmt, ...) printf("%d:%d:" fmt, getpid(), my_gettid(), ## __VA_ARGS__)
 
 struct io_funcs {
 	void *void1;
@@ -56,9 +60,20 @@ struct connection {
 
 
 int global_debug = 0;
+
 extern uint32_t anolis_make_toast(const char msg[]);
-void show_some_alert(const char msg[]) {
-	anolis_make_toast(msg);
+void *_show_some_alert(void* msg) {
+	anolis_make_toast((char*)msg);
+	return NULL;
+}
+void show_some_alert_async(const char msg[]) {
+	pthread_t thr;
+
+	if (0 == pthread_create(&thr, NULL, _show_some_alert, (void*)msg)) {
+		/* Instead of join */
+		DEBUG("alert(%s) in pthread %p\n", msg, thr);
+		pthread_detach(thr);
+	}
 }
 
 
@@ -96,7 +111,7 @@ int my_write_fn(struct connection *conn, char *buf, uint32_t len) {
 	if (!i) {
 		DEBUG("Plain timeout, left %ld.%06ld.\n", conn->timeout.tv_sec, conn->timeout.tv_usec);
 		conn->is_timeout = 1;
-		show_some_alert("Timeout (1) sending data to Quick Fetch software.");
+		show_some_alert_async("Timeout (1) sending data to Quick Fetch software.");
 	}
 
 	/* We expect the max. 8MSamples to be transferred in ~15 seconds; */
@@ -105,7 +120,7 @@ int my_write_fn(struct connection *conn, char *buf, uint32_t len) {
 	if (i > QUICK_FETCH_TOTAL_TIMEOUT) {
 		DEBUG("timeout over total data.\n");
 		conn->is_timeout = 2;
-		show_some_alert("Timeout (2) sending data to Quick Fetch software.");
+		show_some_alert_async("Timeout (2) sending data to Quick Fetch software.");
 	}
 
 	if (conn->is_timeout)
@@ -353,7 +368,7 @@ void do_save_waveform()
 		err = ping_pong(&c);
 		if (err) {
 			DEBUG("pingpong: %s\n", err);
-			show_some_alert(err);
+			show_some_alert_async(err);
 			return;
 		}
 
@@ -399,7 +414,7 @@ void do_save_waveform()
 			sprintf(buf, "QF error during communication: %d, %s", 
 					c.error,
 					strerror(c.error));
-			show_some_alert(buf);
+			show_some_alert_async(buf);
 		}
 	}
 }
@@ -427,7 +442,7 @@ int new_save_to_usb(void *x)
 				if (communication_fd >= 0)
 					close(communication_fd);
 				communication_fd = -1;
-				show_some_alert("Leaving quick fetch mode.");
+				show_some_alert_async("Leaving quick fetch mode.");
 			}
 			return 0;
 		} else {
@@ -440,7 +455,7 @@ int new_save_to_usb(void *x)
 	} else {
 		/* Console is active; stop it (so that it doesn't get restarted by init) and ... */
 		DEBUG("activating quick fetch mode\n");
-		show_some_alert("Activating quick fetch mode.");
+		show_some_alert_async("Activating quick fetch mode.");
 		send_signal_to_console_processes(communication_port, SIGSTOP);
 		console_is_stopped = 1;
 		pressed_time = now.tv_sec;
@@ -562,7 +577,7 @@ int detect()
 		return 1;
 	}
 
-	show_some_alert("This firmware version is not supported "
+	show_some_alert_async("This firmware version is not supported "
 			"by the quick fetch patch.");
 	return 0;
 }
@@ -629,12 +644,12 @@ void *detect_and_patch(void * ignore)
 	int i;
 
 	// Wait until hardware got initialized, to not interfere.
-	sleep(8);
+	sleep(4);
 	i = detect();
 	if (i) {
 
 		my_patch_init(i);
-		//show_some_alert("Quick-fetch patch active");
+		show_some_alert_async("Quick-fetch patch active");
 	}
 	return NULL;
 }
