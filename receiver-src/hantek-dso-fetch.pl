@@ -88,10 +88,12 @@ sub fetch_one
 	# This waits for the DSO - so we must not timeout here.
 	read $fh, my $header, 128;
 
-	local $SIG{ALRM} = sub { die "alarm\n" };
+	my $output = sprintf($file, time());
+	my $tmpfile = "$output.tmp";
+
+	local $SIG{ALRM} = sub { unlink $tmpfile; die "alarm\n" };
 	alarm(1);
 
-	my $output = sprintf($file, time());
 
 	#print length($header), " ", unpack("H*", $header), "\n";
 
@@ -110,7 +112,7 @@ sub fetch_one
 
 	die "Wrong magic: $header" unless $head eq '#9';
 
-	open(O, ">", $output) or die "Can't open '$output' for writing: $!\n";
+	open(O, ">", $tmpfile) or die "Can't open '$tmpfile' for writing: $!\n";
 	#print O "# header: @a \n"; #exit; # pack
 
 	my @channels;
@@ -171,6 +173,7 @@ sub fetch_one
 
 	close O;
 	close F;
+	rename $tmpfile, $output;
 
 	my $chld;
 
