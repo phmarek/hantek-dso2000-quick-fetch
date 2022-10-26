@@ -181,6 +181,8 @@ sub fetch_one
 			open(STDIN, "< /dev/null") or die $!;
 			# TODO: reset STDOUT and STDERR as well?
 			# Would need to remember STDERR for the error message below, though.
+
+			$ENV{$env} = $output;
 			
 			system($run);
 			die "Hantek quick fetch: error running shell command: $?" if $?;
