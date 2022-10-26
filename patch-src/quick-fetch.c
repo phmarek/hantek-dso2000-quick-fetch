@@ -215,12 +215,120 @@ int send_signal_to_console_processes(const char dev[], int signal) {
 }
 
 
-void do_save_waveform() {
+/* Find out whether there's a QF client connected. */
+const char *ping_pong(struct connection *conn)
+{
+	const char ping[]="qf.ping ";
+	const char pong[]="qf.pong";
+	const char pung[]="qf.pung";
+	char buf[400], *cp, *cp2;
+	int got, len, half;
+	int tag, my_tag;
+	struct timespec rcvd_time;
+
+	len = 0;
+	half = sizeof(buf)/2;
+	while (1) {
+		/* Get last few bytes from the serial line; the QF client should have put its
+		 * ping on there long ago. */
+		FD_SET(conn->fd, &conn->select_mask);
+		conn->timeout.tv_sec = 0;
+		conn->timeout.tv_usec = 100;
+		got = select(conn->fd+1, &conn->select_mask, NULL, NULL, &conn->timeout);
+		if (!got) 
+			break;
+
+		got = read(conn->fd, buf+len, half-1);
+		if (got < 0)
+			return "Error reading line";
+		buf[got+len] = 0;
+		DEBUG("ping data: had %d, got %d of %d: %s\n", len, got, half, buf);
+		len += got;
+		if (len > half) {
+			/* 0        len        len+got 
+			 * |OLDOLDold'NEWNEWNEW'____________|
+			 *         /         /
+			 *        /         /  move to low
+			 *       /         /
+			 * |old'NEWNEWNEW'__________________|
+			 * 0            half
+			 */
+			memmove(buf, buf+len+got-half, half);
+			len = half;
+			buf[len] = 0;
+			DEBUG("ping data moved to %d: %s\n", len, buf);
+		}
+	}
+
+	if (len < sizeof(ping)+6)
+		return "No Quickfetch client attached?";
+
+	buf[len] = 0;
+	/* Find last one */
+	cp = strstr(buf, ping);
+	while (cp) {
+		cp2 = strstr(cp+sizeof(ping)-2, ping);
+		if (!cp2) 
+			break;
+		cp = cp2;
+	}
+
+	if (!cp)
+		return "No QF ping";
+
+	tag = 0;
+	got = sscanf(cp, "%*s%d", &tag);
+	DEBUG("ping: got %d, tag %d\n", got, tag);
+	if (!got || tag == 0)
+		return "No QF ping tag";
+
+
+	my_tag = random();
+	len = sprintf(buf, "\n%s %d %d\n", pong, tag, my_tag);
+	got = write(conn->fd, buf, len);
+	DEBUG("pong: sent %d, %s\n", got, buf);
+	if (got != len)
+		return "Error sending QF pong";
+
+	/* 30msec timeout */
+	FD_SET(conn->fd, &conn->select_mask);
+	conn->timeout.tv_sec = 0;
+	conn->timeout.tv_usec = 30e3;
+	got = select(conn->fd+1, &conn->select_mask, NULL, NULL, &conn->timeout);
+	if (!got) 
+		return "QF pong timeout";
+
+	len = read(conn->fd, buf, sizeof(buf)-1);
+	buf[len] = 0;
+	DEBUG("pung: got %d, %s\n", len, buf);
+	if (len < sizeof(pung))
+		return "QF pong receive error";
+
+	tag = 0;
+	rcvd_time.tv_sec = 0;
+	got = sscanf(buf, "%*s %d %ld", &tag, &rcvd_time.tv_sec);
+	DEBUG("pung: tag %d, time %s\n", tag, ctime(&rcvd_time.tv_sec));
+	if (!got || tag != my_tag)
+		return "QF pong bad data";
+
+	if (rcvd_time.tv_sec) {
+		rcvd_time.tv_nsec = 0; /* Not really relevant here */
+		clock_settime(CLOCK_REALTIME, &rcvd_time);
+	}
+
+	return NULL;
+}
+
+
+
+void do_save_waveform() 
+{
 	int fd;
 	void *data;
 	time_t t;
 	uint32_t len;
 	int r, i, end;
+	const char *err;
 
 	struct io_funcs ios = { .write_fn = (void*)my_write_fn };
 	struct connection c = { 
@@ -228,7 +336,6 @@ void do_save_waveform() {
 		.write_count = 1,
 		.my_write_counter = 0,
 	};
-	time(&c.start_time);
 	FD_ZERO(&c.select_mask);
 
 	/* TODO: Put a "gzip" inbetween?
@@ -240,10 +347,19 @@ void do_save_waveform() {
 	if (fd == -1) {
 		DEBUG("No communication open!?!?!");
 	} else if (fd >= 0) {
-//		write(fd, dump_msg, strlen(dump_msg));
-
 		c.error = 0;
 		c.fd = fd;
+
+		err = ping_pong(&c);
+		if (err) {
+			DEBUG("pingpong: %s\n", err);
+			show_some_alert(err);
+			return;
+		}
+
+		/* Handshake fixed the time, so get new value only now. */
+		time(&c.start_time);
+
 		*scpi__priv_wave_state = 1;
 		i = 4;
 		end = 0;

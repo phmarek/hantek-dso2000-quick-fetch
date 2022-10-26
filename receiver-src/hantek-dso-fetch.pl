@@ -81,19 +81,34 @@ sub login
 	exit;
 }
 
+
 sub fetch_one
 {
 	my($fh) = @_;
 
-	# This waits for the DSO - so we must not timeout here.
-	read $fh, my $header, 128;
+	# Ping pong - a 3-way handshake.
+	my $my_tag = time();
 
-	my $output = sprintf($file, time());
-	my $tmpfile = "$output.tmp";
+	print $fh "\n\n\nqf.ping $my_tag\n\n";
+	# This waits for the DSO - so we must not timeout here.
+	my $buf, $rcvd_tag, $remote_tag;
+	while ($my_tag != $rcvd_tag) {
+		sysread($fh, $buf, 4096) or die $!;
+
+		$rcvd_tag=$1, $remote_tag=$2 while ($buf =~ /\s*qf\.pong (\d+) (\d+)\s+/g);
+	}
+	# Send final ACK, and allow time sync.
+	my $pung = "qf.pung $remote_tag " . time() . "\n";
+	syswrite $fh, $pung;
+
 
 	local $SIG{ALRM} = sub { unlink $tmpfile; die "alarm\n" };
 	alarm(1);
 
+	read $fh, my $header, 128;
+
+	my $output = sprintf($file, time());
+	my $tmpfile = "$output.tmp";
 
 	#print length($header), " ", unpack("H*", $header), "\n";
 
