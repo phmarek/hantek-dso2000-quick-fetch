@@ -51,6 +51,7 @@ struct connection {
 	fd_set select_mask;
 	struct timeval timeout;
 	uint32_t was_empty_transmission;
+	int32_t error;
 } __attribute__((packed)) ;
 
 
@@ -64,6 +65,7 @@ void show_some_alert(const char msg[]) {
 int my_write_fn(struct connection *conn, char *buf, uint32_t len) {
 	int i;
 	time_t now;
+	int ret;
 
 	if (conn->is_timeout)
 		return len;
@@ -111,7 +113,12 @@ int my_write_fn(struct connection *conn, char *buf, uint32_t len) {
 
 	if(global_debug)
 		DEBUG(" called for writing: %p, %p, %d\n", conn, buf, len);
-	return write(conn->fd, buf, len);
+
+	ret = write(conn->fd, buf, len);
+	if (ret < 0)
+		conn->error = errno;
+
+	return ret;
 }
 
 
@@ -235,6 +242,7 @@ void do_save_waveform() {
 	} else if (fd >= 0) {
 //		write(fd, dump_msg, strlen(dump_msg));
 
+		c.error = 0;
 		c.fd = fd;
 		*scpi__priv_wave_state = 1;
 		i = 4;
@@ -269,6 +277,14 @@ void do_save_waveform() {
 
 //		r = close(fd);
 		DEBUG("close: %d\n", r);
+
+		if (c.error) {
+			static char buf[200];
+			sprintf(buf, "QF error during communication: %d, %s", 
+					c.error,
+					strerror(c.error));
+			show_some_alert(buf);
+		}
 	}
 }
 
@@ -438,6 +454,7 @@ int detect()
 void switch_debug_output(int x)
 {
 	global_debug = 1- global_debug;
+	DEBUG("verbose debug flag now %d\n", global_debug);
 }
 
 
