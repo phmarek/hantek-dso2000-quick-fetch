@@ -109,6 +109,7 @@ sub fetch_one
 
 	my $output = sprintf($file, time());
 	my $tmpfile = "$output.tmp";
+	my $file_type = ($output =~ /\.wave?$/i ? 'W' : 'C');
 
 	#print length($header), " ", unpack("H*", $header), "\n";
 
@@ -127,9 +128,6 @@ sub fetch_one
 
 	die "Wrong magic: $header" unless $head eq '#9';
 
-	open(O, ">", $tmpfile) or die "Can't open '$tmpfile' for writing: $!\n";
-	#print O "# header: @a \n"; #exit; # pack
-
 	my @channels;
 	my @calc;
 	push @channels, [1,$v1+0, $off1] if $c1e;
@@ -137,20 +135,48 @@ sub fetch_one
 	push @channels, [3,$v3+0, $off3] if $c3e;
 	push @channels, [4,$v4+0, $off4] if $c4e;
 
-	printf O "# CH%d: scale %f, offset %d\n", @$_ for @channels;
 
 	# Because of padding to 4KB we need to take the real sample count.
 	my ($max) = $total_len/scalar(@channels);
 
 	# A space before the dots so the filename can be copy/pasted as a <cword>.
 	printf "Fetching %d channels with %d samples into $output ... ",
-	scalar(@channels), $max;
+		scalar(@channels), $max;
 
-	my @cols = qw(index time);
-	push @cols, map { "raw.CH"  . $_->[0] } @channels;
-	push @cols, map { "volt.CH" . $_->[0] } @channels;
-	print O join($sep, @cols),"\n";
-	# find smallest length
+	open(O, ">", $tmpfile) or die "Can't open '$tmpfile' for writing: $!\n";
+	#print O "# header: @a \n"; #exit; # pack
+
+	if ($file_type eq 'C') {
+		printf O "# CH%d: scale %f, offset %d\n", @$_ for @channels;
+
+		my @cols = qw(index time);
+		push @cols, map { "raw.CH"  . $_->[0] } @channels;
+		push @cols, map { "volt.CH" . $_->[0] } @channels;
+		print O join($sep, @cols),"\n";
+	} elsif ($file_type eq 'W') {
+
+		binmode(O);
+		# https://www-mmsp.ece.mcgill.ca/Documents/AudioFormats/WAVE/WAVE.html
+		
+		# TODO: use 16bit signed instead?
+		$bytes_per_sample = 1;
+		$data_len = $bytes_per_sample * @channels * $max;
+		my $fmt = pack('S S L L S S', 
+			0x0001, # format PCM
+			scalar(@channels),
+			$sampling_rate, # sample rate
+			$bytes_per_sample*$sampling_rate*@channels, # data rate
+			$bytes_per_sample*@channels, # align
+			$bytes_per_sample*8);
+		print O pack('a4 L a4 a4 L a* a4 L',
+			'RIFF', 4 + 4*2 + length($fmt) + 4*2 + $data_len,
+			'WAVE',
+			'fmt ', length($fmt),
+			$fmt,
+			'data', $data_len);
+	} else {
+		die "Unknown filetype??";
+	}
 
 	my $chunk_size = $block_size / scalar(@channels);
 	my $bytes_processed = 0;
@@ -172,17 +198,23 @@ sub fetch_one
 			$chunk_start += $chunk_size;
 		}
 
-		my @volt;
-		my @data;
-		for my $ch (@channels) {
-			my ($idx, $scale, $off, $data) = @$ch;
+		if ($file_type eq 'C') {
+			my @volt;
+			my @data;
+			for my $ch (@channels) {
+				my ($idx, $scale, $off, $data) = @$ch;
 
-			my $byte = unpack("c", substr($data, $i-$chunk_start, 1)); 
-			push @data, $byte;
-			push @volt, AbsVolt($byte, $scale, $off);
+				my $byte = unpack("c", substr($data, $i-$chunk_start, 1)); 
+				push @data, $byte;
+				push @volt, AbsVolt($byte, $scale, $off);
+			}
+			print O join($sep, $i, $i/$sampling_rate, @data, @volt),"\n";
+		} elsif ($file_type eq 'W') {
+			for my $ch (@channels) {
+				my $byte = unpack("c", substr($data, $i-$chunk_start, 1)); 
+				print O pack("c", $byte + 0x80);
+			}
 		}
-
-		print O join($sep, $i, $i/$sampling_rate, @data, @volt),"\n";
 	}
 	alarm(0);
 
