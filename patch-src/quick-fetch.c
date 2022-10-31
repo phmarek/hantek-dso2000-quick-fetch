@@ -148,7 +148,7 @@ static uint32_t *scpi__data_sum_len = 0;
 static int console_is_stopped = 0;
 static int communication_fd = -1;
 
-const char communication_port[] = "/dev/ttyGS0";
+#define communication_port "/dev/ttyGS0"
 
 const char init_msg[] = "INIT\n";
 const char dump_msg[] = "DUMP\n";
@@ -444,6 +444,8 @@ int new_save_to_usb(void *x)
 		console_is_stopped = 1;
 		pressed_time = now.tv_sec;
 
+		/* Undo "damage" done by getty (eg crlf translation) */
+		system("stty raw pass8 < " communication_port);
 		communication_fd = open(communication_port, O_RDWR);
 //		write(communication_fd, init_msg, strlen(init_msg));
 		/* TODO: start thread that waits for commands ?! */
