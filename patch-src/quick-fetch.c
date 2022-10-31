@@ -467,30 +467,6 @@ int new_save_to_usb(void *x)
 	}
 
 	return 1;
-
-	/* Using a fresh process would be nice,
-	 * to _not_ disturb the real process.
-	 * Sadly that doesn't work,
-	 * as we copy some (locked) mutexes, too. */
-	static pid_t last_child_pid;
-
-	if (last_child_pid)
-		kill(last_child_pid, SIGKILL);
-
-	/* Don't disturb working process! */
-	last_child_pid = fork();
-	if (last_child_pid == -1) {
-		DEBUG("can't fork child: %d\n", errno);
-		return 0;
-	}
-	if (last_child_pid)
-		return 0; // Parent
-
-	/* Child */
-	do_save_waveform();
-
-	/* Avoid ANY cleanups */
-	kill(getpid(), SIGKILL);
 }
 
 static int did_patch = 0;
