@@ -342,7 +342,7 @@ void do_save_waveform()
 	void *data;
 	time_t t;
 	uint32_t len;
-	int r, i, end;
+	int r;
 	const char *err;
 
 	struct io_funcs ios = { .write_fn = (void*)my_write_fn };
@@ -376,38 +376,15 @@ void do_save_waveform()
 		time(&c.start_time);
 
 		*scpi__priv_wave_state = 1;
-		i = 4;
-		end = 0;
 		DEBUG(" state %d; all %u, sum %u\n", *scpi__priv_wave_state, *scpi__data_all_len, *scpi__data_sum_len);
 		do {
-//			DEBUG("calling %d: state %x\n", i, *scpi__priv_wave_state);
 			do {
 				c.was_empty_transmission = 0;
 				r = scpi__priv_wave_d_all(&c);
 			}
 			while (c.was_empty_transmission);
 
-			if ((*scpi__data_sum_len + 4000) == *scpi__data_all_len)
-				end = 1;
-			/*
-			if (end) {
-				i--;
-				DEBUG(" got result %p, time %d, state %d; all %u, sum %u\n", 
-						r, i, *scpi__priv_wave_state,
-						*scpi__data_all_len, *scpi__data_sum_len);
-			}
-			*/
-			if (*scpi__priv_wave_state == 1) 
-				break;
-		} while (!(end && i==0));
-
-		/*
-		r = scpi__priv_wave_d_all(&c);
-		DEBUG(" after: got result %p, state %d\n", r, *scpi__priv_wave_state);
-		*/
-
-//		r = close(fd);
-		DEBUG("close: %d\n", r);
+		} while ( *scpi__priv_wave_state != 1);
 
 		if (c.error) {
 			static char buf[200];
