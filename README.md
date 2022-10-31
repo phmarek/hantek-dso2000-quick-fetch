@@ -50,6 +50,11 @@ index   time    raw.CH1 raw.CH2 volt.CH1 volt.CH2
 
 The header lines are optimized for `R`.
 
+You can also get a `WAV` file, by simply specifying the file extension `.wav`:
+
+![Audacity for one sinus and a rectangle wave](images/audacity.png)
+
+
 ### Sample graphing
 
 Here's an 2 x 400 KSamples example using [`gnuplot`](http://www.gnuplot.info/):
@@ -57,7 +62,7 @@ Here's an 2 x 400 KSamples example using [`gnuplot`](http://www.gnuplot.info/):
 F=/tmp/test-1664046008.csv # specify your file here 
 gnuplot -p -e " plot '$F' using 2:3 with lines title 'CH1', '$F' using 2:4 with lines title 'CH2'"
 ```
-![Gnuplot for one sinus wave one both inputs](images/gnuplot1.png)
+![Gnuplot for one sinus and a rectangle wave](images/gnuplot1.png)
 
 ## Error situations
 

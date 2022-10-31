@@ -211,7 +211,7 @@ sub fetch_one
 			print O join($sep, $i, $i/$sampling_rate, @data, @volt),"\n";
 		} elsif ($file_type eq 'W') {
 			for my $ch (@channels) {
-				my $byte = unpack("c", substr($data, $i-$chunk_start, 1)); 
+				my $byte = unpack("c", substr($ch->[3], $i-$chunk_start, 1)); 
 				print O pack("c", $byte + 0x80);
 			}
 		}
