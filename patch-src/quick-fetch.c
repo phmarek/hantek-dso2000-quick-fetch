@@ -417,6 +417,7 @@ int new_save_to_usb(void *x)
 		if (pressed_time + QUICK_FETCH_DEACT_TIMEOUT >= now.tv_sec) {
 			pressed_count++;
 			if (pressed_count >= QUICK_FETCH_DEACT_COUNT) {
+				pressed_count = 0;
 				DEBUG("leaving quick fetch mode\n");
 				/* Kill the processes hard - init will restart a clean getty. */
 				send_signal_to_console_processes(communication_port, SIGKILL);
