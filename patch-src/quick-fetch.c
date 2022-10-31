@@ -21,7 +21,7 @@
 
 /* Press the key so often in so many seconds to get out of quick mode,
  * ie. to get the USB console back. */
-#define QUICK_FETCH_DEACT_TIMEOUT 2
+#define QUICK_FETCH_DEACT_TIMEOUT 4
 #define QUICK_FETCH_DEACT_COUNT 3
 
 /* TODO: tuneable because of overclocking? */

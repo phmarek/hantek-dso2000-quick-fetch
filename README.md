@@ -12,15 +12,22 @@ The patch checks the binary for a few signature bytes (eg. the firmware string `
 
 # Usage
 
-With the patch active on your DSO, pressing the `SAVE TO USB` button after booting will disable your USB console, so that the USB serial port can be used for data transfer. The scope will show a message `Connect your quick fetch software!`, which you would now do by running the script:
+With the patch active on your DSO, you'll see a short notice about that a few seconds after booting.
+
+Pressing the `SAVE TO USB` button after booting will disable your USB console, so that the USB serial port can be used for data transfer. The scope will show the message `Activating quick fetch mode.` as confirmation.
+
+
+Now you run the script:
 
 ```
 receiver-src/hantek-dso-fetch.pl --cont --file /tmp/my-hantek-data.%d.csv
 ```
 
-Now you're ready; use your DSO as usual, and when you see a waveform you want to transfer to the PC just press the `SAVE TO USB` button. The scope locks updates (`RUN/STOP` will turn red), and the script will show a line about the transfer being started and then being done.
+Now you're ready to go -- use your DSO as usual, and when you see a waveform you want to transfer to the PC just press the `SAVE TO USB` button. The scope locks updates (`RUN/STOP` will turn red), and the script will show a line about the transfer being started and then being done.
 
 My machine with a DSO2D15 (no overclocking) needs approximately 15 seconds to transfer 2 channels with 4MSamples each - that's 20 times as fast as the SCPI way, being CPU bound on the scope (and ~30%) on my laptop.
+
+If your script isn't running when you press the button, you'll see a notification about that; and, in case there are any communication problems (there shouldn't, though you could cause one eg. by stopping the script in the middle of a data transfer), an error message (eg. a transmission timeout) will be displayed.
 
 ## Parameters
 
@@ -58,9 +65,9 @@ Both the DSO patch and the fetch script use timeouts - when you see errors or ar
 
 ## But I need by USB console again!
 
-No problem. Just don't press the `SAVE TO USB` button after booting the DSO (then the console will _still_ be active), or if you already used the quick fetch functionality, just stop the script and press the button 3 times in 2 seconds -- that will show a message and reactivate the USB console.
+No problem. Just don't press the `SAVE TO USB` button after booting the DSO (then the console will _still_ be active), or if you already used the quick fetch functionality, just stop the script and press the button 3 times in 4 seconds -- that will show a message and reactivate the USB console.
 
-Pressing the button once more *will stop your USB console* and switch to the quick fetch functionality again, telling you to connect the script.
+Pressing the button once more will switch to the quick fetch functionality and so will stop your USB console again.
 
 # *Manual* Installation
 
