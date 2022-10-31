@@ -336,7 +336,7 @@ const char *ping_pong(struct connection *conn)
 
 
 
-void do_save_waveform() 
+int do_save_waveform() 
 {
 	int fd;
 	void *data;
@@ -361,6 +361,7 @@ void do_save_waveform()
 	fd = communication_fd;
 	if (fd == -1) {
 		DEBUG("No communication open!?!?!");
+		return 0;
 	} else if (fd >= 0) {
 		c.error = 0;
 		c.fd = fd;
@@ -369,7 +370,7 @@ void do_save_waveform()
 		if (err) {
 			DEBUG("pingpong: %s\n", err);
 			show_some_alert_async(err);
-			return;
+			return 0;
 		}
 
 		/* Handshake fixed the time, so get new value only now. */
@@ -392,7 +393,11 @@ void do_save_waveform()
 					c.error,
 					strerror(c.error));
 			show_some_alert_async(buf);
+			return 0;
 		}
+
+		// Success
+		return 1;
 	}
 }
 
@@ -426,8 +431,9 @@ int new_save_to_usb(void *x)
 			/* First click after some time; get a dump. */
 			DEBUG("quick fetch do at %ld\n", now.tv_sec);
 			pressed_time = now.tv_sec;
-			pressed_count = 0;
-			do_save_waveform();
+			/* Only reset when successful. */
+			if (do_save_waveform())
+				pressed_count = 0;
 		}
 	} else {
 		/* Console is active; stop it (so that it doesn't get restarted by init) and ... */
