@@ -57,7 +57,7 @@ You can also get a `WAV` file, by simply specifying the file extension `.wav`:
 
 ### Sample graphing
 
-Here's an 2 x 400 KSamples example using [`gnuplot`](http://www.gnuplot.info/):
+Here's an 2 x 40 KSamples example using [`gnuplot`](http://www.gnuplot.info/):
 ```
 F=/tmp/test-1664046008.csv # specify your file here 
 gnuplot -p -e " plot '$F' using 2:3 with lines title 'CH1', '$F' using 2:4 with lines title 'CH2'"
