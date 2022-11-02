@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest factory="yes">
+	<Vendor          name="hantek"/> 
+	<Product         name="DSO"/> 
+	<Model           name="DSO4000b"/> 
+	<SoftwaveVersion version="1.0"/> 
+	<date            value="161203"/> 
+
+	<cmd>chmod 777 /dso/var/run/package/do_update.sh</cmd>
+	<cmd>/dso/var/run/package/do_update.sh</cmd>
+</manifest>
