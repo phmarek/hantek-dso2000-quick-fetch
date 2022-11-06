@@ -563,7 +563,9 @@ void my_patch_init(int version) {
 		return;
 
 
+	/* Don't deactivate key for now
 	patch_a_jump(fh, new_save_to_usb, save_to_usb_fn);
+	*/
 
 	switch (version) {
 		case 1:
@@ -578,11 +580,22 @@ void my_patch_init(int version) {
 			 *                                                                                 = 73h    s
 			 *   0006a044 5e bf fe eb    bl   <EXTERNAL>::system                               int system(char * __command)
 			 *   0006a048 fa 0f a0 e3    mov  out_file,#0x3e8
+			 *
+			 * We need to keep this in:
 			 *   0006a04c 09 80 88 e0    add  r8,r8,r9
+			 *
 			 *   0006a050 a1 c1 fe eb    bl   <EXTERNAL>::usleep                               int usleep(__useconds_t __usecon
 			 *   0006a054 ee ff ff ea    b    LAB_0006a014
 			 */
-			patch_a_jump(fh, (void*)0x6a014, 0x6a054);
+			patch_a_jump(fh, (void*)0x6a04c, 0x6a040);
+			patch_a_jump(fh, (void*)0x6a014, 0x6a050);
+
+			/*   0006a14c 05 00 a0 e3                   mov        out_file,#0x5
+			 *   0006a150 67 ff ff eb                   bl         set_progress??                                   undefined set_progress??(uint pa
+			 *   0006a154 0a 00 54 e1                   cmp        r4,r10
+			 */
+			patch_a_jump(fh, (void*)0x6a154, 0x6a150);
+
 
 			break;
 	}
