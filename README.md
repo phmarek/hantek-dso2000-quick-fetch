@@ -36,6 +36,16 @@ If your script isn't running when you press the button, you'll see a notificatio
 - `--sep` defaults to a `Tab`; by using a comma (`,`) you could get a "real" CSV (which I wouldn't recommend - comma vs. decimal point is likely to go wrong in your spreadsheet or data analysis software.)
 - `--device` allows you to switch to another USB serial device instead of `/dev/ttyACM0`.
 
+## Notifications
+
+The script also accepts a `--run` argument; the string passed in will be run via the shell when a file has been received.
+
+```
+receiver-src/hantek-dso-fetch.pl -f /tmp/my-hantek-data.%d.wav --cont --run receiver-src/notify-script.sh
+```
+
+There's an example script that tries to play some audio file (via `paplay`) and shows a notification, so that you (working with the DSO!) immediately know that the data has been received.
+
 ## Output
 
 The output is a CSV (really TSV ;) file with two comment lines; here's an example:
