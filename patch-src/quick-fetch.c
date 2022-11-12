@@ -52,7 +52,9 @@ struct connection {
 	uint32_t my_write_counter;
 	time_t start_time;
 	uint32_t is_timeout;
-	fd_set select_mask;
+	fd_set select_read_mask;
+	fd_set select_send_mask;
+	fd_set select_excp_mask;
 	struct timeval timeout;
 	uint32_t was_empty_transmission;
 	int32_t error;
@@ -104,14 +106,22 @@ int my_write_fn(struct connection *conn, char *buf, uint32_t len) {
 	conn->my_write_counter += len;
 
 	/* Timeout handling -- if the receiver crashes or just does not exist, we stop transmitting. */
-	FD_SET(conn->fd, &conn->select_mask);
+	FD_SET(conn->fd, &conn->select_send_mask);
+	FD_SET(conn->fd, &conn->select_excp_mask);
 	conn->timeout.tv_sec = (int)(QUICK_FETCH_PER_PACKET_TIMEOUT);
 	conn->timeout.tv_usec = (int)(QUICK_FETCH_PER_PACKET_TIMEOUT * 1000000) % 1000000;
-	i = select(conn->fd+1, NULL, &conn->select_mask, NULL, &conn->timeout);
+	i = select(conn->fd+1, NULL, &conn->select_send_mask, &conn->select_excp_mask, &conn->timeout);
 	if (!i) {
 		DEBUG("Plain timeout, left %ld.%06ld.\n", conn->timeout.tv_sec, conn->timeout.tv_usec);
 		conn->is_timeout = 1;
 		show_some_alert_async("Timeout (1) sending data to Quick Fetch software.");
+		return len; // abort
+	}
+	if (FD_ISSET(conn->fd, &conn->select_excp_mask)) {
+		DEBUG("exception on USB fd");
+		conn->is_timeout = 1;
+		show_some_alert_async("Timeout (3) sending data to Quick Fetch software.");
+		return len; // abort
 	}
 
 	/* We expect the max. 8MSamples to be transferred in ~15 seconds; */
@@ -250,11 +260,16 @@ const char *ping_pong(struct connection *conn)
 	while (1) {
 		/* Get last few bytes from the serial line; the QF client should have put its
 		 * ping on there long ago. */
-		FD_SET(conn->fd, &conn->select_mask);
+		FD_SET(conn->fd, &conn->select_read_mask);
+		FD_SET(conn->fd, &conn->select_excp_mask);
 		conn->timeout.tv_sec = 0;
 		conn->timeout.tv_usec = 100;
-		got = select(conn->fd+1, &conn->select_mask, NULL, NULL, &conn->timeout);
+		got = select(conn->fd+1, &conn->select_read_mask, NULL, &conn->select_excp_mask, &conn->timeout);
 		if (!got) 
+			break;
+
+		/* USB port trouble? */
+		if (FD_ISSET(conn->fd, &conn->select_excp_mask))
 			break;
 
 		got = read(conn->fd, buf+len, half-1);
@@ -310,12 +325,15 @@ const char *ping_pong(struct connection *conn)
 		return "Error sending QF pong";
 
 	/* 30msec timeout */
-	FD_SET(conn->fd, &conn->select_mask);
+	FD_SET(conn->fd, &conn->select_read_mask);
+	FD_SET(conn->fd, &conn->select_excp_mask);
 	conn->timeout.tv_sec = 0;
 	conn->timeout.tv_usec = 30e3;
-	got = select(conn->fd+1, &conn->select_mask, NULL, NULL, &conn->timeout);
+	got = select(conn->fd+1, &conn->select_read_mask, NULL, &conn->select_excp_mask, &conn->timeout);
 	if (!got) 
 		return "QF pong timeout";
+	if (FD_ISSET(conn->fd, &conn->select_excp_mask))
+		return "QF pong USB transfer trouble";
 
 	len = read(conn->fd, buf, sizeof(buf)-1);
 	buf[len] = 0;
@@ -349,13 +367,15 @@ int do_save_waveform()
 	int r;
 	const char *err;
 
-	struct io_funcs ios = { .write_fn = (void*)my_write_fn };
-	struct connection c = { 
+	static struct io_funcs ios = { .write_fn = (void*)my_write_fn };
+	static struct connection c = { 
 		.io_funcs = &ios, 
 		.write_count = 1,
 		.my_write_counter = 0,
 	};
-	FD_ZERO(&c.select_mask);
+	FD_ZERO(&c.select_read_mask);
+	FD_ZERO(&c.select_send_mask);
+	FD_ZERO(&c.select_excp_mask);
 
 	/* TODO: Put a "gzip" inbetween?
 	 * Seems unnecessary, the USB file transfer mode does 8MB in <2secs */
