@@ -61,6 +61,18 @@ struct connection {
 } __attribute__((packed)) ;
 
 
+static uint32_t save_to_usb_no_udisk_beq = 0;
+static uint32_t save_to_usb_code_space = 0;
+static uint32_t (*scpi__priv_wave_d_all)(struct connection*) = 0;
+static uint32_t *scpi__priv_wave_state = 0;
+static uint32_t *scpi__data_all_len = 0;
+static uint32_t *scpi__data_sum_len = 0;
+
+
+static int32_t *usb_mode__is_peripheral = 0;
+
+
+
 int global_debug = 0;
 
 extern uint32_t anolis_make_toast(const char msg[]);
@@ -117,8 +129,12 @@ int my_write_fn(struct connection *conn, char *buf, uint32_t len) {
 		show_some_alert_async("Timeout (1) sending data to Quick Fetch software.");
 		return len; // abort
 	}
-	if (FD_ISSET(conn->fd, &conn->select_excp_mask)) {
-		DEBUG("exception on USB fd");
+	if (FD_ISSET(conn->fd, &conn->select_send_mask)) {
+		// Expected
+		if(global_debug)
+			DEBUG("Can write to fd\n");
+	} else if (FD_ISSET(conn->fd, &conn->select_excp_mask)) {
+		DEBUG("exception on USB fd\n");
 		conn->is_timeout = 1;
 		show_some_alert_async("Timeout (3) sending data to Quick Fetch software.");
 		return len; // abort
@@ -133,11 +149,13 @@ int my_write_fn(struct connection *conn, char *buf, uint32_t len) {
 		show_some_alert_async("Timeout (2) sending data to Quick Fetch software.");
 	}
 
+	if(global_debug)
+		DEBUG(" called for writing: %p, %d; timeout %d, state %d\n", 
+				buf, len,
+				conn->is_timeout, *scpi__priv_wave_state);
+
 	if (conn->is_timeout)
 		return len; // Abort!
-
-	if(global_debug)
-		DEBUG(" called for writing: %p, %p, %d\n", conn, buf, len);
 
 	ret = write(conn->fd, buf, len);
 	if (ret < 0)
@@ -145,17 +163,6 @@ int my_write_fn(struct connection *conn, char *buf, uint32_t len) {
 
 	return ret;
 }
-
-
-static uint32_t save_to_usb_no_udisk_beq = 0;
-static uint32_t save_to_usb_code_space = 0;
-static uint32_t (*scpi__priv_wave_d_all)(struct connection*) = 0;
-static uint32_t *scpi__priv_wave_state = 0;
-static uint32_t *scpi__data_all_len = 0;
-static uint32_t *scpi__data_sum_len = 0;
-
-
-static int32_t *usb_mode__is_peripheral = 0;
 
 
 
@@ -269,8 +276,8 @@ const char *ping_pong(struct connection *conn)
 			break;
 
 		/* USB port trouble? */
-		if (FD_ISSET(conn->fd, &conn->select_excp_mask))
-			break;
+		if (!FD_ISSET(conn->fd, &conn->select_read_mask))
+			return "Error reading line (2)";
 
 		got = read(conn->fd, buf+len, half-1);
 		if (got < 0)
@@ -332,8 +339,8 @@ const char *ping_pong(struct connection *conn)
 	got = select(conn->fd+1, &conn->select_read_mask, NULL, &conn->select_excp_mask, &conn->timeout);
 	if (!got) 
 		return "QF pong timeout";
-	if (FD_ISSET(conn->fd, &conn->select_excp_mask))
-		return "QF pong USB transfer trouble";
+	if (!FD_ISSET(conn->fd, &conn->select_read_mask))
+		return "QF pong timeout 2";
 
 	len = read(conn->fd, buf, sizeof(buf)-1);
 	buf[len] = 0;
