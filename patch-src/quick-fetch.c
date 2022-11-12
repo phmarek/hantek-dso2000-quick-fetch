@@ -137,11 +137,15 @@ int my_write_fn(struct connection *conn, char *buf, uint32_t len) {
 }
 
 
-static uint32_t save_to_usb_fn = 0;
+static uint32_t save_to_usb_no_udisk_beq = 0;
+static uint32_t save_to_usb_code_space = 0;
 static uint32_t (*scpi__priv_wave_d_all)(struct connection*) = 0;
 static uint32_t *scpi__priv_wave_state = 0;
 static uint32_t *scpi__data_all_len = 0;
 static uint32_t *scpi__data_sum_len = 0;
+
+
+static int32_t *usb_mode__is_peripheral = 0;
 
 
 
@@ -406,6 +410,12 @@ int new_save_to_usb(void *x)
 	static time_t pressed_time;
 	static int pressed_count = 0;
 
+	/* Check for USB connection to PC */
+	if (*usb_mode__is_peripheral == 0) {
+		show_some_alert_async("No USB device (stick or PC) found");
+		return 0;
+	}
+
 	struct timespec now;
 	/* Not unlikely that someone/something sets the wall clock time;
 	 * then time() would be wrong. */
@@ -457,12 +467,34 @@ int new_save_to_usb(void *x)
 
 static int did_patch = 0;
 
-int patch_a_jump(int fh, void* my_addr, uint32_t patch_addr)
+#define OPCODE_UNCOND_JUMP (0xea000000)
+#define OPCODE_UNCOND_CALL (0xeb000000)
+#define OPCODE_IF_EQU_JUMP (0x0a000000)
+
+int patch_a_code(int fh, uint32_t my_code, uint32_t patch_addr)
+{
+	uint8_t *ptr = (void*)patch_addr;
+	int i;
+
+	i = pwrite64(fh, &my_code, sizeof(my_code), (uint64_t)patch_addr);
+	DEBUG("wrote %d bytes (0x%x) at 0x%x: now 0x%x 0x%x 0x%x 0x%x\n",
+			i, my_code, patch_addr,
+			ptr[0],
+			ptr[1],
+			ptr[2],
+			ptr[3]);
+	if (i != 4)
+		return 0;
+
+	return 1;
+}
+
+
+int patch_a_jump(int fh, void* my_addr, uint32_t patch_addr, int opcode)
 {
 	int64_t dist;
 	uint32_t jmp_val;
 	uint32_t jmp;
-	uint8_t *ptr = (void*)patch_addr;
 	int i;
 
 	/* Current address + 4  (next IP)
@@ -481,25 +513,15 @@ int patch_a_jump(int fh, void* my_addr, uint32_t patch_addr)
 	}
 
 	// "b", ie. branch always == 0xea
-	jmp = (jmp_val & 0xffffff) | 0xea000000;
+	jmp = (jmp_val & 0xffffff) | opcode;
 
-	i = pwrite64(fh, &jmp, 4, (uint64_t)patch_addr);
-	DEBUG("wrote %d = 0x%x: now 0x%x 0x%x 0x%x 0x%x\n",
-			i, jmp,
-			ptr[0],
-			ptr[1],
-			ptr[2],
-			ptr[3]);
-	if (i != 4)
-		return 0;
-
-	return 1;
+	return patch_a_code(fh, jmp, patch_addr);
 }
 
 
 int detect()
 {
-	unsigned char *ptr;
+	uint32_t *ptr;
 	char buffer[80];
 	int i;
 	const char v200[] = "2.0.0(220517.00)";
@@ -518,23 +540,19 @@ int detect()
 	if (strncmp((void*)0xc5da0, v200, sizeof(v200)) == 0) {
 		DEBUG("found %s\n", v200);
 
-		save_to_usb_fn = 0x342cc;
-		ptr = (void*)save_to_usb_fn;
-		if (
-				ptr[0] != 0xf0 ||
-				ptr[1] != 0x43 ||
-				ptr[2] != 0x2d ||
-				ptr[3] != 0xe9
-		   ) {
-			DEBUG("wrong bytes at %p!! %x %x %x %x\n", ptr, ptr[0], ptr[1], ptr[2], ptr[3]);
+		save_to_usb_no_udisk_beq = 0x342dc;
+		ptr = (void*)save_to_usb_no_udisk_beq;
+		if (*ptr != 0x0a000078) {
+			DEBUG("wrong bytes at %p!! 0x%x\n", ptr, *ptr);
 			return 0;
 		}
+		save_to_usb_code_space = 0x34500;
 
-		scpi__priv_wave_d_all = (void*)0x939f4;
-		scpi__priv_wave_state = (void*)0xe1600;
-		scpi__data_all_len    = (void*)0x9aed64;
-		scpi__data_sum_len    = (void*)0x9a6444;
-//		scpi__ignore_write    = (void*)0xab06c;
+		scpi__priv_wave_d_all   = (void*)0x939f4;
+		scpi__priv_wave_state   = (void*)0xe1600;
+		scpi__data_all_len      = (void*)0x9aed64;
+		scpi__data_sum_len      = (void*)0x9a6444;
+		usb_mode__is_peripheral = (void*)0x9aed34;
 
 		return 1;
 	}
@@ -552,8 +570,27 @@ void switch_debug_output(int x)
 }
 
 
+void *patch_init_delayed(void * ignore)
+{
+	// Wait until hardware got initialized, to not interfere.
+	sleep(4);
+
+	/* Cleanup USB console processes.
+	 * At this point after reboot, just a newly started getty. */
+	send_signal_to_console_processes(communication_port, SIGKILL);
+
+	signal(SIGPOLL, (void*)do_save_waveform);
+	/* Auto reap children */
+	signal(SIGCHLD, SIG_DFL);
+	signal(SIGUSR2, switch_debug_output);
+
+	return NULL;
+}
+
+
 void my_patch_init(int version) {
 	int fh;
+	pthread_t thr;
 
 	if (did_patch)
 		return;
@@ -562,17 +599,34 @@ void my_patch_init(int version) {
 	if (fh < 0)
 		return;
 
+	// We patch the code immediately before it's being used... */
 
-	/* Don't deactivate key for now
-	patch_a_jump(fh, new_save_to_usb, save_to_usb_fn);
-	*/
+	/* "Save to USB" key: If no USB stick present, use the new code to save to a PC. */
+	/* Fix up stack: We need to fix the pushed registers, and the local variables.
+	 * anolis_is_udisk_mounted() changes R0 and R3, which wouldn't matter;
+	 * but the call changes LR which we need to restore, so just adding to SP
+	 * isn't enough.
+	 * And the error path comes in here, too, so there's not enough space for
+	 * an LDMIA, an ADD, and a jump.
+	 *
+	 * But in the same functions there's a check for the display;
+	 * on this embedded system, I don't think this will ever trigger, so we
+	 * reuse that space. 
+	 *     beq space */
+	patch_a_jump(fh, (void*)save_to_usb_code_space, save_to_usb_no_udisk_beq, OPCODE_IF_EQU_JUMP);
+	/* 	   add   sp,sp,#0x234
+     *     ldmia sp!, {r4, r5, r6, r7, r8, r9, lr}
+	 *     b new_save_to_usb */
+	patch_a_code(fh, 0xe28ddf8d,      save_to_usb_code_space +0);
+	patch_a_code(fh, 0xe8bd43f0,      save_to_usb_code_space +4);
+	patch_a_jump(fh, new_save_to_usb, save_to_usb_code_space +8, OPCODE_UNCOND_JUMP);
 
 	switch (version) {
 		case 1:
 			/* Remove debug output - that being written to the serial console slows everything down. */
-			patch_a_jump(fh, (void*)0x93e70, 0x93e60);
-			patch_a_jump(fh, (void*)0x93ad8, 0x93acc);
-			patch_a_jump(fh, (void*)0x93b20, 0x93b08);
+			patch_a_jump(fh, (void*)0x93e70, 0x93e60, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, (void*)0x93ad8, 0x93acc, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, (void*)0x93b20, 0x93b08, OPCODE_UNCOND_JUMP);
 
 			/* Patch slowdown during LWF file write to USB stick
 			 *   0006a03c 5e c1 fe eb    bl   <EXTERNAL>::fwrite                               size_t fwrite(void * __ptr, size
@@ -584,17 +638,20 @@ void my_patch_init(int version) {
 			 * We need to keep this in:
 			 *   0006a04c 09 80 88 e0    add  r8,r8,r9
 			 *
+			 * This gets removed again:
 			 *   0006a050 a1 c1 fe eb    bl   <EXTERNAL>::usleep                               int usleep(__useconds_t __usecon
 			 *   0006a054 ee ff ff ea    b    LAB_0006a014
+			 *
+			 * Yeah, we could move the ADD up and write a single jump.
 			 */
-			patch_a_jump(fh, (void*)0x6a04c, 0x6a040);
-			patch_a_jump(fh, (void*)0x6a014, 0x6a050);
+			patch_a_jump(fh, (void*)0x6a04c, 0x6a040, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, (void*)0x6a014, 0x6a050, OPCODE_UNCOND_JUMP);
 
 			/*   0006a14c 05 00 a0 e3                   mov        out_file,#0x5
 			 *   0006a150 67 ff ff eb                   bl         set_progress??                                   undefined set_progress??(uint pa
 			 *   0006a154 0a 00 54 e1                   cmp        r4,r10
 			 */
-			patch_a_jump(fh, (void*)0x6a154, 0x6a150);
+			patch_a_jump(fh, (void*)0x6a154, 0x6a150, OPCODE_UNCOND_JUMP);
 
 
 			break;
@@ -602,13 +659,9 @@ void my_patch_init(int version) {
 	close(fh);
 	did_patch = 1;
 
-	/* Cleanup old USB console processes */
-	send_signal_to_console_processes(communication_port, SIGKILL);
-
-	signal(SIGPOLL, (void*)do_save_waveform);
-	/* Auto reap children */
-	signal(SIGCHLD, SIG_DFL);
-	signal(SIGUSR2, switch_debug_output);
+	if (0 == pthread_create(&thr, NULL, patch_init_delayed, NULL)) {
+		pthread_detach(thr);
+	}
 
 	return;
 }
@@ -618,22 +671,15 @@ void *detect_and_patch(void * ignore)
 {
 	int i;
 
-	// Wait until hardware got initialized, to not interfere.
-	sleep(4);
 	i = detect();
 	if (i) {
-
 		my_patch_init(i);
-		show_some_alert_async("Quick-fetch patch active");
 	}
 	return NULL;
 }
 
 void __attribute__((constructor)) my_init()  {
-	pthread_t thr;
-	if (0 == pthread_create(&thr, NULL, detect_and_patch, NULL)) {
-		pthread_detach(thr);
-	}
+	detect_and_patch(NULL);
 }
 
 /* vim: set ts=4 sw=4 noet  : */
