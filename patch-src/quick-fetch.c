@@ -91,10 +91,37 @@ void show_some_alert_async(const char msg[]) {
 }
 
 
+
 int my_write_fn(struct connection *conn, char *buf, uint32_t len) {
-	int i;
+	uint32_t i;
 	time_t now;
 	int ret;
+	static char safe[12] = { 0 };
+	char x;
+
+	/* We expect the max. 8MSamples to be transferred in ~15 seconds; */
+	time(&now);
+	i = now - conn->start_time;
+	if (i > QUICK_FETCH_TOTAL_TIMEOUT) {
+		DEBUG("timeout over total data.\n");
+		conn->is_timeout = 2;
+		show_some_alert_async("Timeout (2) sending data to Quick Fetch software.");
+		return len;
+	}
+
+	for (i = 0; i<sizeof(safe)-1; i++) {
+		x = buf[i];
+
+		safe[i] = i >= len ? '.' :
+			(x >= ' ' && x <= 0x7e) ? x : '.';
+	}
+
+	if(global_debug)
+		DEBUG(" writing at %d: %4d bytes, total %7d; timeout %d, state %d, buf '%s'\n", 
+				(int)now, len, conn->my_write_counter,
+				conn->is_timeout, 
+				*scpi__priv_wave_state, 
+				safe);
 
 	if (conn->is_timeout)
 		return len;
@@ -124,38 +151,20 @@ int my_write_fn(struct connection *conn, char *buf, uint32_t len) {
 	conn->timeout.tv_usec = (int)(QUICK_FETCH_PER_PACKET_TIMEOUT * 1000000) % 1000000;
 	i = select(conn->fd+1, NULL, &conn->select_send_mask, &conn->select_excp_mask, &conn->timeout);
 	if (!i) {
-		DEBUG("Plain timeout, left %ld.%06ld.\n", conn->timeout.tv_sec, conn->timeout.tv_usec);
+		DEBUG("Plain timeout, left %ld.%06ld.\n", 
+				conn->timeout.tv_sec, conn->timeout.tv_usec);
 		conn->is_timeout = 1;
 		show_some_alert_async("Timeout (1) sending data to Quick Fetch software.");
 		return len; // abort
 	}
 	if (FD_ISSET(conn->fd, &conn->select_send_mask)) {
 		// Expected
-		if(global_debug)
-			DEBUG("Can write to fd\n");
 	} else if (FD_ISSET(conn->fd, &conn->select_excp_mask)) {
 		DEBUG("exception on USB fd\n");
 		conn->is_timeout = 1;
 		show_some_alert_async("Timeout (3) sending data to Quick Fetch software.");
 		return len; // abort
 	}
-
-	/* We expect the max. 8MSamples to be transferred in ~15 seconds; */
-	time(&now);
-	i = now - conn->start_time;
-	if (i > QUICK_FETCH_TOTAL_TIMEOUT) {
-		DEBUG("timeout over total data.\n");
-		conn->is_timeout = 2;
-		show_some_alert_async("Timeout (2) sending data to Quick Fetch software.");
-	}
-
-	if(global_debug)
-		DEBUG(" called for writing: %p, %d; timeout %d, state %d\n", 
-				buf, len,
-				conn->is_timeout, *scpi__priv_wave_state);
-
-	if (conn->is_timeout)
-		return len; // Abort!
 
 	ret = write(conn->fd, buf, len);
 	if (ret < 0)
@@ -476,10 +485,10 @@ int new_save_to_usb(void *x)
 	} else {
 		/* Console is active; stop it (so that it doesn't get restarted by init) and ... */
 		DEBUG("activating quick fetch mode\n");
-		show_some_alert_async("Activating quick fetch mode.");
 		send_signal_to_console_processes(communication_port, SIGSTOP);
 		console_is_stopped = 1;
 		pressed_time = now.tv_sec;
+		show_some_alert_async("Activating quick fetch mode.");
 
 		/* Undo "damage" done by getty (eg crlf translation) */
 		system("stty raw pass8 < " communication_port);

@@ -12,12 +12,12 @@ The patch checks the binary for a few signature bytes (eg. the firmware string `
 
 # Usage
 
-With the patch active on your DSO, you'll see a short notice about that a few seconds after booting.
+With the patch active on your DSO and your PC connected via USB, wait for the "USB connection" icon in the bottom right corner of the DSO screen.
 
-Pressing the `SAVE TO USB` button after booting will disable your USB console, so that the USB serial port can be used for data transfer. The scope will show the message `Activating quick fetch mode.` as confirmation.
+Pressing the `SAVE TO USB` button now will disable your USB console, so that the USB serial port can be used for data transfer. The scope will show the message `Activating quick fetch mode.` as confirmation.
 
 
-Now you run the script:
+Next you run the script:
 
 ```
 receiver-src/hantek-dso-fetch.pl --cont --file /tmp/my-hantek-data.%d.csv
