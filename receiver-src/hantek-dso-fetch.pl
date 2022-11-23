@@ -227,7 +227,7 @@ sub fetch_one
 	if ($run) {
 		my $pid = fork();
 		die "Can't fork: $!" unless defined($pid);
-		if ($pid) {
+		if (!$pid) {
 			open(STDIN, "< /dev/null") or die $!;
 			# TODO: reset STDOUT and STDERR as well?
 			# Would need to remember STDERR for the error message below, though.
