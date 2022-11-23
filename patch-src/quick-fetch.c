@@ -384,11 +384,7 @@ int do_save_waveform()
 	const char *err;
 
 	static struct io_funcs ios = { .write_fn = (void*)my_write_fn };
-	static struct connection c = { 
-		.io_funcs = &ios, 
-		.write_count = 1,
-		.my_write_counter = 0,
-	};
+	struct connection c = { 0 };
 	FD_ZERO(&c.select_read_mask);
 	FD_ZERO(&c.select_send_mask);
 	FD_ZERO(&c.select_excp_mask);
@@ -403,6 +399,9 @@ int do_save_waveform()
 		DEBUG("No communication open!?!?!");
 		return 0;
 	} else if (fd >= 0) {
+		c.io_funcs = &ios; 
+		c.write_count = 1;
+		c.my_write_counter = 0;
 		c.error = 0;
 		c.fd = fd;
 
