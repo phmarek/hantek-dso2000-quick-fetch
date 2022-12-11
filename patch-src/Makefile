@@ -22,4 +22,4 @@ sz:
 # Virtual hostname defined in ~/.ssh/config
 # No SFTP or SCP
 scp:
-	tar -cf - quick-fetch.so | ssh dso tar -xvf - 
+	tar -cf - quick-fetch.so | ssh root@hantek.local tar -xvf - 
