@@ -643,6 +643,7 @@ void *patch_init_delayed(void * ignore)
 	return NULL;
 }
 
+#include "mdns.c"
 
 void my_patch_init(int version) {
 	int fh;
@@ -724,6 +725,9 @@ void my_patch_init(int version) {
 	did_patch = 1;
 
 	if (0 == pthread_create(&thr, NULL, patch_init_delayed, NULL)) {
+		pthread_detach(thr);
+	}
+	if (0 == pthread_create(&thr, NULL, push_mcast_packets, NULL)) {
 		pthread_detach(thr);
 	}
 

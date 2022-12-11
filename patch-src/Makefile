@@ -11,9 +11,15 @@ START=0x00e00000
 
 quick-fetch.so: quick-fetch.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -fPIC -shared -Wl,-Ttext-segment=$(START) $< -o $@
+quick-fetch.so: mdns.c
 
 send-tar-to-hantek:
 	sudo tar -cf /dev/disk/by-id/usb-Waveform_Dump*-0:0 quick-fetch.so
 
 sz:
 	sz -8 --verbose quick-fetch.so < /dev/ttyACM0 > /dev/ttyACM0
+
+# Virtual hostname defined in ~/.ssh/config
+# No SFTP or SCP
+scp:
+	tar -cf - quick-fetch.so | ssh dso tar -xvf - 
