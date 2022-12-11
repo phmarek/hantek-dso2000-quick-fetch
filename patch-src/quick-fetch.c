@@ -464,7 +464,7 @@ socklen_t len;
 		pfd.events = POLLIN;
 		pfd.revents = 0;
 		r = poll(&pfd, 1, 0);
-		if (!(pfd.events & POLLIN)) {
+		if (!(pfd.revents & POLLIN)) {
 			DEBUG("Nothing to accept\n");
 			break;
 		}
@@ -483,12 +483,12 @@ socklen_t len;
 
 		// check for still active (ie. not closed again!)
 		pfd.fd = fd;
-		pfd.events = POLLIN | POLLOUT | POLLERR;
+		pfd.events = POLLIN | POLLOUT | POLLERR | POLLHUP;
 		pfd.revents = 0;
 		r = poll(&pfd, 1, 0);
-		if ((pfd.revents & POLLOUT) && !(pfd.revents & POLLERR)) {
+		if ((pfd.revents & POLLOUT) && !(pfd.revents & (POLLERR | POLLHUP))) {
 			DEBUG("got a TCP connection to write to -- fd %d, [%s]:%d\n",
-					fd, remote, ntohl(si.sin_port));
+					fd, remote, ntohs(si.sin_port));
 			r = actually_do_save_waveform(fd, 0);
 			shutdown(fd, SHUT_RDWR);
 			close(fd);
@@ -496,7 +496,7 @@ socklen_t len;
 		}
 
 		DEBUG("broken TCP connection fd %d [%s]:%d\n",
-				fd, remote, ntohl(si.sin_port));
+				fd, remote, ntohs(si.sin_port));
 		// broken TCP connection
 		close(fd);
 	}
@@ -808,7 +808,7 @@ void my_patch_init(int version) {
 		pthread_detach(thr);
 	}
 
-	tcp_port_fd = socket(AF_INET, SOCK_STREAM, 0);
+	tcp_port_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
 	if (tcp_port_fd != -1) {
 		si.sin_family = AF_INET;
 		// si.sin_addr  is 0.0.0.0
