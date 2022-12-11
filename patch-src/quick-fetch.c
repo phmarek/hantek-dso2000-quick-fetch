@@ -1,15 +1,17 @@
-/* Patch button "save to usb" to instead cause a ZMODEM transfer of the binary data. */
-
 #define _GNU_SOURCE
+#include <sys/socket.h>
 #include <stdio.h>
 #include <sys/select.h>
 #include <sys/syscall.h>      /* Definition of SYS_* constants */
 #include <pthread.h>
 #include <sys/types.h>
+#include <netinet/in.h>
 #include <dirent.h>
 #include <errno.h>
+#include <arpa/inet.h>
 #include <dlfcn.h>
 #include <signal.h>
+#include <poll.h>
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
@@ -28,6 +30,8 @@
 #define QUICK_FETCH_TOTAL_TIMEOUT 30
 
 #define QUICK_FETCH_PER_PACKET_TIMEOUT 0.5
+
+#define QUICK_FETCH_TCP_PORT 8001
 
 
 // using gettid() means that GLIBC2.30 is required, which Hantek's libc6 doesn't provide
@@ -176,7 +180,8 @@ int my_write_fn(struct connection *conn, char *buf, uint32_t len) {
 
 
 static int console_is_stopped = 0;
-static int communication_fd = -1;
+static int ttygs0_serial_fd = -1;
+static int tcp_port_fd = -1;
 
 #define communication_port "/dev/ttyGS0"
 
@@ -374,9 +379,8 @@ const char *ping_pong(struct connection *conn)
 
 
 
-int do_save_waveform() 
+int actually_do_save_waveform(int fd, int do_pingpong) 
 {
-	int fd;
 	void *data;
 	time_t t;
 	uint32_t len;
@@ -389,27 +393,29 @@ int do_save_waveform()
 	FD_ZERO(&c.select_send_mask);
 	FD_ZERO(&c.select_excp_mask);
 
+
 	/* TODO: Put a "gzip" inbetween?
 	 * Seems unnecessary, the USB file transfer mode does 8MB in <2secs */
 
 	data = (void*)0x000e5000;
 	len  = 0x00b0d000 - (uint32_t)data;
-	fd = communication_fd;
 	if (fd == -1) {
 		DEBUG("No communication open!?!?!");
 		return 0;
-	} else if (fd >= 0) {
+	} else {
 		c.io_funcs = &ios; 
 		c.write_count = 1;
 		c.my_write_counter = 0;
 		c.error = 0;
 		c.fd = fd;
 
-		err = ping_pong(&c);
-		if (err) {
-			DEBUG("pingpong: %s\n", err);
-			show_some_alert_async(err);
-			return 0;
+		if (do_pingpong) {
+			err = ping_pong(&c);
+			if (err) {
+				DEBUG("pingpong: %s\n", err);
+				show_some_alert_async(err);
+				return 0;
+			}
 		}
 
 		/* Handshake fixed the time, so get new value only now. */
@@ -440,6 +446,72 @@ int do_save_waveform()
 	}
 }
 
+
+int do_save_waveform() 
+{
+	int fd;
+	int r;
+socklen_t len;
+	struct pollfd pfd;
+	struct sockaddr_in si;
+	char remote[INET6_ADDRSTRLEN+1];
+
+	/* We need to loop - there might be several TCP connections
+	 * that got already closed again. */
+	while (1) {
+		/* Look for TCP connection */
+		pfd.fd = tcp_port_fd;
+		pfd.events = POLLIN;
+		pfd.revents = 0;
+		r = poll(&pfd, 1, 0);
+		if (!(pfd.events & POLLIN)) {
+			DEBUG("Nothing to accept\n");
+			break;
+		}
+
+		len = sizeof(si);
+		fd = accept(tcp_port_fd, &si, &len);
+		if (fd == -1)
+			break;
+
+/* TODO: ipv6? */
+		if (si.sin_family == AF_INET)
+			inet_ntop(AF_INET, &si.sin_addr, 
+					remote, sizeof(remote));
+		else
+			break;
+
+		// check for still active (ie. not closed again!)
+		pfd.fd = fd;
+		pfd.events = POLLIN | POLLOUT | POLLERR;
+		pfd.revents = 0;
+		r = poll(&pfd, 1, 0);
+		if ((pfd.revents & POLLOUT) && !(pfd.revents & POLLERR)) {
+			DEBUG("got a TCP connection to write to -- fd %d, [%s]:%d\n",
+					fd, remote, ntohl(si.sin_port));
+			r = actually_do_save_waveform(fd, 0);
+			shutdown(fd, SHUT_RDWR);
+			close(fd);
+			return r;
+		}
+
+		DEBUG("broken TCP connection fd %d [%s]:%d\n",
+				fd, remote, ntohl(si.sin_port));
+		// broken TCP connection
+		close(fd);
+	}
+
+	// No valid TCP, try serial? 
+	if (ttygs0_serial_fd) {
+		DEBUG("Using serial connection on fd %d\n", ttygs0_serial_fd);
+		return actually_do_save_waveform(ttygs0_serial_fd, 1);
+	}
+
+	DEBUG("No connection available\n");
+	return 0;
+}
+
+
 int new_save_to_usb(void *x)
 {
 	static time_t pressed_time;
@@ -467,9 +539,9 @@ int new_save_to_usb(void *x)
 				/* Kill the processes hard - init will restart a clean getty. */
 				send_signal_to_console_processes(communication_port, SIGKILL);
 				console_is_stopped = 0;
-				if (communication_fd >= 0)
-					close(communication_fd);
-				communication_fd = -1;
+				if (ttygs0_serial_fd >= 0)
+					close(ttygs0_serial_fd);
+				ttygs0_serial_fd = -1;
 				show_some_alert_async("Leaving quick fetch mode.");
 			}
 			return 0;
@@ -491,8 +563,8 @@ int new_save_to_usb(void *x)
 
 		/* Undo "damage" done by getty (eg crlf translation) */
 		system("stty raw pass8 < " communication_port);
-		communication_fd = open(communication_port, O_RDWR);
-//		write(communication_fd, init_msg, strlen(init_msg));
+		ttygs0_serial_fd = open(communication_port, O_RDWR);
+//		write(ttygs0_serial_fd, init_msg, strlen(init_msg));
 		/* TODO: start thread that waits for commands ?! */
 		/* TODO: Message to screen saying now active */
 	}
@@ -640,6 +712,9 @@ void *patch_init_delayed(void * ignore)
 	signal(SIGCHLD, SIG_DFL);
 	signal(SIGUSR2, switch_debug_output);
 
+	/* Needed for TCP sockets, mostly. */
+	signal(SIGPIPE, SIG_IGN);
+
 	return NULL;
 }
 
@@ -648,6 +723,8 @@ void *patch_init_delayed(void * ignore)
 void my_patch_init(int version) {
 	int fh;
 	pthread_t thr;
+	struct sockaddr_in si = { 0 };
+	int ret;
 
 	if (did_patch)
 		return;
@@ -672,7 +749,7 @@ void my_patch_init(int version) {
 	 *     beq space */
 	patch_a_jump(fh, (void*)save_to_usb_code_space, save_to_usb_no_udisk_beq, OPCODE_IF_EQU_JUMP);
 	/* 	   add   sp,sp,#0x234
-     *     ldmia sp!, {r4, r5, r6, r7, r8, r9, lr}
+	 *     ldmia sp!, {r4, r5, r6, r7, r8, r9, lr}
 	 *     b new_save_to_usb */
 	patch_a_code(fh, 0xe28ddf8d,      save_to_usb_code_space +0);
 	patch_a_code(fh, 0xe8bd43f0,      save_to_usb_code_space +4);
@@ -731,8 +808,32 @@ void my_patch_init(int version) {
 		pthread_detach(thr);
 	}
 
+	tcp_port_fd = socket(AF_INET, SOCK_STREAM, 0);
+	if (tcp_port_fd != -1) {
+		si.sin_family = AF_INET;
+		// si.sin_addr  is 0.0.0.0
+		si.sin_port = htons(QUICK_FETCH_TCP_PORT);
+
+		ret = bind(tcp_port_fd, &si, sizeof(si));
+		if (ret != 0) {
+			DEBUG("Can't bind TCP port %d\n", QUICK_FETCH_TCP_PORT);
+			close(tcp_port_fd);
+			tcp_port_fd = -1;
+		} else {
+			ret = listen(tcp_port_fd, 1);
+			if (ret != 0) {
+				DEBUG("Can't listen on TCP port %d\n", QUICK_FETCH_TCP_PORT);
+				close(tcp_port_fd);
+				tcp_port_fd = -1;
+			} else {
+				DEBUG("TCP port %d waiting\n", QUICK_FETCH_TCP_PORT);
+			}
+		}
+	}
+
 	return;
 }
+
 
 
 void *detect_and_patch(void * ignore)
