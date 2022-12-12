@@ -66,19 +66,6 @@ sub login
 	sysread($fh, my $void, 4096) while select(my $r=$mask, undef, undef, 0);
 
 	return $fh;
-
-	#	syswrite($fh, "\n");
-	#	sysread($fh, $buf, 100) or die $!;
-	#	print $buf;
-	#	exit;
-	$expect = Expect->exp_init($fh);
-	$expect->raw_pty(1);
-	$expect->expect(1.0, "login:") or die;
-	$expect->send("root\r");
-	$expect->expect(1.0, '~$') or die;
-	$expect->send("export PS1='----'\r");
-	$expect->expect(1.0, '----') or die;
-	exit;
 }
 
 
