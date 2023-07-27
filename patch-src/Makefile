@@ -23,3 +23,5 @@ sz:
 # No SFTP or SCP
 scp:
 	tar -cf - quick-fetch.so | ssh root@hantek.local tar -xvf - 
+cp:
+	tar -cf - quick-fetch.so | ssh root@172.31.254.254 tar -xvf - 

@@ -6,6 +6,7 @@
 #include <pthread.h>
 #include <sys/types.h>
 #include <netinet/in.h>
+#include <linux/tcp.h>
 #include <dirent.h>
 #include <errno.h>
 #include <arpa/inet.h>
@@ -135,7 +136,9 @@ int my_write_fn(struct connection *conn, char *buf, uint32_t len) {
 		return len;
 
 	if (len == 11 && memcmp(buf, "#9000000000", 11) == 0) {
-		DEBUG("empty packet.\n");
+		if (global_debug)
+			DEBUG("empty packet.\n");
+
 		conn->was_empty_transmission = 1;
 		return len;
 	}
@@ -446,6 +449,26 @@ int actually_do_save_waveform(int fd, int do_pingpong)
 	}
 }
 
+int is_socket_alive(int fd)
+{
+	struct tcp_info ti;
+	socklen_t len = sizeof(ti);
+
+	// not in that old linux/tcp.h
+#ifndef SOL_TCP
+#define SOL_TCP 6
+#endif
+	if (getsockopt(fd, SOL_TCP, TCP_INFO, &ti, &len) == -1) {
+		DEBUG("can't get state for socket on %d\n", fd);
+		return 0;
+	}
+
+	DEBUG("socket %d reported with state %d\n", fd, ti.tcpi_state);
+
+	// https://unix.stackexchange.com/questions/470174/what-is-the-meaning-of-the-connection-state-constants-in-proc-net-tcp
+	return ti.tcpi_state == 1;
+}
+
 
 int do_save_waveform() 
 {
@@ -482,17 +505,22 @@ socklen_t len;
 			break;
 
 		// check for still active (ie. not closed again!)
-		pfd.fd = fd;
-		pfd.events = POLLIN | POLLOUT | POLLERR | POLLHUP;
-		pfd.revents = 0;
-		r = poll(&pfd, 1, 0);
-		if ((pfd.revents & POLLOUT) && !(pfd.revents & (POLLERR | POLLHUP))) {
-			DEBUG("got a TCP connection to write to -- fd %d, [%s]:%d\n",
-					fd, remote, ntohs(si.sin_port));
-			r = actually_do_save_waveform(fd, 0);
-			shutdown(fd, SHUT_RDWR);
-			close(fd);
-			return r;
+		if (is_socket_alive(fd)) {
+
+			// check for still active II
+			pfd.fd = fd;
+			pfd.events = POLLIN | POLLOUT | POLLERR | POLLHUP;
+			pfd.revents = 0;
+			r = poll(&pfd, 1, 0);
+			if ((pfd.revents & POLLOUT) && !(pfd.revents & (POLLERR | POLLHUP))) {
+				DEBUG("got a TCP connection to write to -- fd %d, [%s]:%d\n",
+						fd, remote, ntohs(si.sin_port));
+				r = actually_do_save_waveform(fd, 0);
+				shutdown(fd, SHUT_RDWR);
+				close(fd);
+				return r;
+			}
+
 		}
 
 		DEBUG("broken TCP connection fd %d [%s]:%d\n",
@@ -564,7 +592,7 @@ int new_save_to_usb(void *x)
 		/* Undo "damage" done by getty (eg crlf translation) */
 		system("stty raw pass8 < " communication_port);
 		ttygs0_serial_fd = open(communication_port, O_RDWR);
-//		write(ttygs0_serial_fd, init_msg, strlen(init_msg));
+		//		write(ttygs0_serial_fd, init_msg, strlen(init_msg));
 		/* TODO: start thread that waits for commands ?! */
 		/* TODO: Message to screen saying now active */
 	}
@@ -639,7 +667,7 @@ int detect()
 	i = readlink("/proc/self/exe", buffer, sizeof(buffer)-1);
 	buffer[i] = 0;
 	if (strcmp(buffer, "/dso/app/phoenix") != 0) {
-//		DEBUG("wrong exe: %s\n", buffer);
+		//		DEBUG("wrong exe: %s\n", buffer);
 		return 0;
 	}
 
@@ -820,7 +848,8 @@ void my_patch_init(int version) {
 			close(tcp_port_fd);
 			tcp_port_fd = -1;
 		} else {
-			ret = listen(tcp_port_fd, 1);
+			// Multiple connections could be waiting if the client was aborted!!
+			ret = listen(tcp_port_fd, 10);
 			if (ret != 0) {
 				DEBUG("Can't listen on TCP port %d\n", QUICK_FETCH_TCP_PORT);
 				close(tcp_port_fd);
