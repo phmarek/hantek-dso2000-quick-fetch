@@ -718,26 +718,6 @@ int detect()
 		return 2;
 	}
 
-	if (strncmp((void*)0xc5da0, v200_202205, sizeof(v200_202205)) == 0) {
-		DEBUG("found %s\n", v200_202205);
-
-		save_to_usb_no_udisk_beq = 0x342dc;
-		ptr = (void*)save_to_usb_no_udisk_beq;
-		if (*ptr != 0x0a000078) {
-			DEBUG("wrong bytes at %p!! 0x%x\n", ptr, *ptr);
-			return 0;
-		}
-		save_to_usb_code_space = 0x34500;
-
-		scpi__priv_wave_d_all   = (void*)0x939f4;
-		scpi__priv_wave_state   = (void*)0xe1600;
-		scpi__data_all_len      = (void*)0x9aed64;
-		scpi__data_sum_len      = (void*)0x9a6444;
-		usb_mode__is_peripheral = (void*)0x9aed34;
-
-		return 1;
-	}
-
 	show_some_alert_async("This firmware version is not supported "
 			"by the quick fetch patch.");
 	return 0;
@@ -809,11 +789,11 @@ void my_patch_init(int version) {
 	patch_a_jump(fh, new_save_to_usb, save_to_usb_code_space +8, OPCODE_UNCOND_JUMP);
 
 	switch (version) {
-		case 1:
+		case 2:
 			/* Remove debug output - that being written to the serial console slows everything down. */
-			patch_a_jump(fh, (void*)0x93e70, 0x93e60, OPCODE_UNCOND_JUMP);
-			patch_a_jump(fh, (void*)0x93ad8, 0x93acc, OPCODE_UNCOND_JUMP);
-			patch_a_jump(fh, (void*)0x93b20, 0x93b08, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, (void*)0x93de8, 0x93dd8, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, (void*)0x93a50, 0x93a44, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, (void*)0x93a98, 0x93a80, OPCODE_UNCOND_JUMP);
 
 			/* Patch slowdown during LWF file write to USB stick
 			 *   0006a03c 5e c1 fe eb    bl   <EXTERNAL>::fwrite                               size_t fwrite(void * __ptr, size
@@ -830,22 +810,7 @@ void my_patch_init(int version) {
 			 *   0006a054 ee ff ff ea    b    LAB_0006a014
 			 *
 			 * Yeah, we could move the ADD up and write a single jump.
-			 */
-			patch_a_jump(fh, (void*)0x6a04c, 0x6a040, OPCODE_UNCOND_JUMP);
-			patch_a_jump(fh, (void*)0x6a014, 0x6a050, OPCODE_UNCOND_JUMP);
-
-			/*   0006a14c 05 00 a0 e3                   mov        out_file,#0x5
-			 *   0006a150 67 ff ff eb                   bl         set_progress??                                   undefined set_progress??(uint pa
-			 *   0006a154 0a 00 54 e1                   cmp        r4,r10
-			 */
-			patch_a_jump(fh, (void*)0x6a154, 0x6a150, OPCODE_UNCOND_JUMP);
-			break;
-		case 2:
-			patch_a_jump(fh, (void*)0x93de8, 0x93dd8, OPCODE_UNCOND_JUMP);
-			patch_a_jump(fh, (void*)0x93a50, 0x93a44, OPCODE_UNCOND_JUMP);
-			patch_a_jump(fh, (void*)0x93a98, 0x93a80, OPCODE_UNCOND_JUMP);
-
-			patch_a_jump(fh, (void*)0x6a09c, 0x6a090, OPCODE_UNCOND_JUMP);
+			 */			patch_a_jump(fh, (void*)0x6a09c, 0x6a090, OPCODE_UNCOND_JUMP);
 			patch_a_jump(fh, (void*)0x6a064, 0x6a0a0, OPCODE_UNCOND_JUMP);
 
 			patch_a_jump(fh, (void*)0x6a1a4, 0x6a1a0, OPCODE_UNCOND_JUMP);
