@@ -665,6 +665,7 @@ int detect()
 	int i;
 	const char v200_202205[] = "2.0.0(220517.00)";
 	const char v200_202210[] = "2.0.0(221028.00)";
+	const char v300_202303[] = "3.0.0(230327.00)";
 
 
 	buffer[0] = 0;
@@ -676,6 +677,26 @@ int detect()
 	}
 
 	DEBUG("right exe: %s\n", buffer);
+
+	if (strncmp((void*)0xc5f28, v300_202303, sizeof(v300_202303)) == 0) {
+		DEBUG("found %s\n", v300_202303);
+
+		save_to_usb_no_udisk_beq = 0x342d8;
+		ptr = (void*)save_to_usb_no_udisk_beq;
+		if (*ptr != 0x0a000078) {
+			DEBUG("wrong bytes at %p!! 0x%x\n", ptr, *ptr);
+			return 0;
+		}
+		save_to_usb_code_space = 0x344fc;
+
+		scpi__priv_wave_d_all   = (void*)0x93938;
+		scpi__priv_wave_state   = (void*)0xe1604;
+		scpi__data_all_len      = (void*)0x9aed7c;
+		scpi__data_sum_len      = (void*)0x9a645c;
+		usb_mode__is_peripheral = (void*)0x9aed4c;
+
+		return 3;
+	}
 
 	if (strncmp((void*)0xc5d30, v200_202210, sizeof(v200_202210)) == 0) {
 		DEBUG("found %s\n", v200_202210);
@@ -828,6 +849,16 @@ void my_patch_init(int version) {
 			patch_a_jump(fh, (void*)0x6a064, 0x6a0a0, OPCODE_UNCOND_JUMP);
 
 			patch_a_jump(fh, (void*)0x6a1a4, 0x6a1a0, OPCODE_UNCOND_JUMP);
+			break;
+		case 3:
+			patch_a_jump(fh, (void*)0x93db0, 0x93da0, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, (void*)0x93a18, 0x93a0c, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, (void*)0x93a60, 0x93a48, OPCODE_UNCOND_JUMP);
+
+			patch_a_jump(fh, (void*)0x6a04c, 0x6a040, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, (void*)0x6a014, 0x6a050, OPCODE_UNCOND_JUMP);
+
+			patch_a_jump(fh, (void*)0x6a154, 0x6a150, OPCODE_UNCOND_JUMP);
 			break;
 	}
 	close(fh);
