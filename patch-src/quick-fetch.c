@@ -571,16 +571,18 @@ int new_save_to_usb(void *x)
 					close(ttygs0_serial_fd);
 				ttygs0_serial_fd = -1;
 				show_some_alert_async("Leaving quick fetch mode.");
+				return 0;
 			}
-			return 0;
+			/* Unless it was the third time in quick succession, return data. */
 		} else {
 			/* First click after some time; get a dump. */
 			DEBUG("quick fetch do at %ld\n", now.tv_sec);
 			pressed_time = now.tv_sec;
-			/* Only reset when successful. */
-			if (do_save_waveform())
-				pressed_count = 0;
 		}
+
+		/* Only reset when successful. */
+		if (do_save_waveform())
+			pressed_count = 0;
 	} else {
 		/* Console is active; stop it (so that it doesn't get restarted by init) and ... */
 		DEBUG("activating quick fetch mode\n");
