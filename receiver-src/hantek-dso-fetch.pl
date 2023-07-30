@@ -2,6 +2,7 @@
 
 use Getopt::Long;
 use Expect;
+use Socket;
 
 my $debug = 0;
 my $file = "hantek-dso-output-%d.csv";
@@ -11,65 +12,125 @@ my $sep = "\t";
 my $grid = 25;
 my $block_size = 4000;
 
-my $dev = "/dev/ttyACM0";
+
+my $dev = $ENV{"HANTEK_DEVICE"};
 my $env = "RECEIVED_HANTEK_FILE";
 my $run = undef;
 
 GetOptions(
-	"cont|continuous|repeated|r" => \$repeated,
+	"cont|continuous|repeated|r|c" => \$repeated,
 	"file=s"   => \$file,
-	"run=s"   => \$run,
-	"device=s"   => \$dev,
-	"sep=s"   => \$sep,
-	"debug+"  => \$debug) or die(<DATA>);
+	"run=s"    => \$run,
+	"device=s" => \$dev,
+	"sep=s"    => \$sep,
+	"debug+"   => \$debug) or die(<DATA>);
 
 # one remaining arguments may be the file pattern.
 $file = shift() if @ARGV == 1;
 
+my $dev_tty = "/dev/ttyACM0";
+my $dev_tcp = "hantek.local";
+my $dev_tcp = "172.31.254.254:8001";
 
-our $fh = login();
+$dev ||= $dev_tcp;
+my $fetcher = open_function($dev);
+our $fh;
 
 if ($repeated) {
 	$| = 1;
 	# $SIG{"CHLD"} = "IGNORE";
 	print "Multi-capture enabled. Waiting for data.\n";
+
+	warn("No %d found in filename - adding that.\n"),
+		$file .= ".%d"
+		unless $file =~ /\%[dsx]/;
+
 	while (1) {
 		# In case there's a transmission problem, don't stop this loop!
 		# TODO: re-open device
-		eval fetch_one($fh);
+		eval &$fetcher();
 	}
 } else {
-	fetch_one($fh);
+	&$fetcher();
 }
 
 
 exit;
 
-sub login
+sub open_serial
 {
-	open($fh, "+<", $dev) or die "Can't open $dev\n";
-	binmode($fh);
-	my $pid = fork();
-	if ($pid == 0) {
-		open(STDIN, "<&", $fh) or die $!;
-		exec("stty","-echo", "raw", "pass8");
-		die;
-		exit 1;
+	my($dev) = @_;
+
+	unless ($fh) {
+		open($fh, "+<", $dev) or die "Can't open $dev\n";
+		binmode($fh);
+		my $pid = fork();
+		if ($pid == 0) {
+			open(STDIN, "<&", $fh) or die $!;
+			exec("stty","-echo", "raw", "pass8");
+			die;
+			exit 1;
+		}
+		die "Can't fork" if !defined $pid;
+		waitpid($pid, 0) or die $!;
+
+		# Empty serial buffer - the login process etc. might have been running
+
+		my $mask = "";
+		vec($mask, fileno($fh), 1) = 1;
+		sysread($fh, my $void, 4096) while select(my $r=$mask, undef, undef, 0);
 	}
-	die "Can't fork" if !defined $pid;
-	waitpid($pid, 0) or die $!;
-
-	# Empty serial buffer - the login process etc. might have been running
-
-	my $mask = "";
-	vec($mask, fileno($fh), 1) = 1;
-	sysread($fh, my $void, 4096) while select(my $r=$mask, undef, undef, 0);
 
 	return $fh;
 }
 
+sub open_tcp
+{
+	my($tgt) = @_;
 
-sub fetch_one
+	my ($ip6, $ip4, $hostname, $port) =
+	$tgt =~ m{^ (?: tcp: /?/? )?
+		(?: \[ ( [a-f0-9:]+ ) \] |
+		( [0-9.]+ ) |
+		( [0-9a-zA-Z.-]+ ) )
+		(?: : (\d+) )?$}xi;
+	my $dest = $hostname || $ip4 || $ip6;
+	return undef unless $port && $dest;
+
+	return sub {
+		socket(my $socket, PF_INET, SOCK_STREAM, 0)
+			or die "socket: $!";
+
+		connect($socket, pack_sockaddr_in($port, inet_aton($dest)))
+			or die "connect: $!";
+
+		binmode($socket);
+		alarm(2);
+		really_fetch($socket);
+		close $socket;
+	};
+}
+
+sub open_function
+{
+	my($dev) = @_;
+	
+	my $f = open_tcp($dev);
+	if ($f) {
+		return $f;
+
+	} elsif ($dev =~ m,^/dev/tty,) {
+		my $fh = open_serial($dev);
+		return sub {
+			fetch_serial($fh);
+		};
+	} else {
+		die "Bad device '$dev'\n";
+	}
+}
+
+
+sub fetch_serial
 {
 	my($fh) = @_;
 
@@ -88,9 +149,15 @@ sub fetch_one
 	my $pung = "qf.pung $remote_tag " . time() . "\n";
 	syswrite $fh, $pung;
 
+	alarm(2);
+	really_fetch($fh);
+}
+
+sub really_fetch
+{
+	my($fh) = @_;
 
 	local $SIG{ALRM} = sub { unlink $tmpfile; die "alarm\n" };
-	alarm(1);
 
 	read $fh, my $header, 128;
 
@@ -112,6 +179,7 @@ sub fetch_one
 	) = my @a =
 	unpack('a2 a9a9a9 a1a1 a8 s1s1s1s1 a7a7a7a7 a1a1a1a1 a9 a6 x9 a9 a6 a10', $header);
 	# TODO: signed LE short not available? For the offsets.
+	# pack
 
 	die "Wrong magic: $header" unless $head eq '#9';
 
@@ -254,7 +322,14 @@ Options:
      for --continuous it should include "%d" to insert a timestamp
 
   --device=/dev/ttyACM0
-     Hantek DSO2000 USB serial device
+  --device=hantek.local
+  --device=172.31.254.254:8001
+     Hantek DSO2000 USB device to use.
+     If not given as argument, default is taken from the
+     environment variable $HANTEK_DEVICE;
+     if that doesn't exist or is empty,
+     /dev/ttyACM0 and TCP via hantek.local are tried.
+     A serial device must be passed in including the /dev/ prefix!
 
   --sep=,
      Separator to use in output, normally tab
