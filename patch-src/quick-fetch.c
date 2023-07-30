@@ -474,7 +474,7 @@ int do_save_waveform()
 {
 	int fd;
 	int r;
-socklen_t len;
+	socklen_t len;
 	struct pollfd pfd;
 	struct sockaddr_in si;
 	char remote[INET6_ADDRSTRLEN+1];
@@ -497,7 +497,7 @@ socklen_t len;
 		if (fd == -1)
 			break;
 
-/* TODO: ipv6? */
+		/* TODO: ipv6? */
 		if (si.sin_family == AF_INET)
 			inet_ntop(AF_INET, &si.sin_addr, 
 					remote, sizeof(remote));
