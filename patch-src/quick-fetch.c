@@ -184,7 +184,8 @@ int my_write_fn(struct connection *conn, char *buf, uint32_t len) {
 
 static int console_is_stopped = 0;
 static int ttygs0_serial_fd = -1;
-static int tcp_port_fd = -1;
+static int tcp_listening_port_fd = -1;
+static int tcp_fd = -1;
 
 #define communication_port "/dev/ttyGS0"
 
@@ -472,7 +473,6 @@ int is_socket_alive(int fd)
 
 int do_save_waveform() 
 {
-	int fd;
 	int r;
 	socklen_t len;
 	struct pollfd pfd;
@@ -483,7 +483,7 @@ int do_save_waveform()
 	 * that got already closed again. */
 	while (1) {
 		/* Look for TCP connection */
-		pfd.fd = tcp_port_fd;
+		pfd.fd = tcp_listening_port_fd;
 		pfd.events = POLLIN;
 		pfd.revents = 0;
 		r = poll(&pfd, 1, 0);
@@ -493,8 +493,8 @@ int do_save_waveform()
 		}
 
 		len = sizeof(si);
-		fd = accept(tcp_port_fd, &si, &len);
-		if (fd == -1)
+		tcp_fd = accept(tcp_listening_port_fd, &si, &len);
+		if (tcp_fd == -1)
 			break;
 
 		/* TODO: ipv6? */
@@ -505,28 +505,30 @@ int do_save_waveform()
 			break;
 
 		// check for still active (ie. not closed again!)
-		if (is_socket_alive(fd)) {
+		if (is_socket_alive(tcp_fd)) {
 
 			// check for still active II
-			pfd.fd = fd;
+			pfd.fd = tcp_fd;
 			pfd.events = POLLIN | POLLOUT | POLLERR | POLLHUP;
 			pfd.revents = 0;
 			r = poll(&pfd, 1, 0);
 			if ((pfd.revents & POLLOUT) && !(pfd.revents & (POLLERR | POLLHUP))) {
 				DEBUG("got a TCP connection to write to -- fd %d, [%s]:%d\n",
-						fd, remote, ntohs(si.sin_port));
-				r = actually_do_save_waveform(fd, 0);
-				shutdown(fd, SHUT_RDWR);
-				close(fd);
+						tcp_fd, remote, ntohs(si.sin_port));
+				r = actually_do_save_waveform(tcp_fd, 0);
+				shutdown(tcp_fd, SHUT_RDWR);
+				close(tcp_fd);
+				tcp_fd = -1;
 				return r;
 			}
 
 		}
 
 		DEBUG("broken TCP connection fd %d [%s]:%d\n",
-				fd, remote, ntohs(si.sin_port));
+				tcp_fd, remote, ntohs(si.sin_port));
 		// broken TCP connection
-		close(fd);
+		close(tcp_fd);
+		tcp_fd = -1;
 	}
 
 	// No valid TCP, try serial? 
@@ -838,24 +840,24 @@ void my_patch_init(int version) {
 		pthread_detach(thr);
 	}
 
-	tcp_port_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
-	if (tcp_port_fd != -1) {
+	tcp_listening_port_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+	if (tcp_listening_port_fd != -1) {
 		si.sin_family = AF_INET;
 		// si.sin_addr  is 0.0.0.0
 		si.sin_port = htons(QUICK_FETCH_TCP_PORT);
 
-		ret = bind(tcp_port_fd, &si, sizeof(si));
+		ret = bind(tcp_listening_port_fd, &si, sizeof(si));
 		if (ret != 0) {
 			DEBUG("Can't bind TCP port %d\n", QUICK_FETCH_TCP_PORT);
-			close(tcp_port_fd);
-			tcp_port_fd = -1;
+			close(tcp_listening_port_fd);
+			tcp_listening_port_fd = -1;
 		} else {
 			// Multiple connections could be waiting if the client was aborted!!
-			ret = listen(tcp_port_fd, 10);
+			ret = listen(tcp_listening_port_fd, 10);
 			if (ret != 0) {
 				DEBUG("Can't listen on TCP port %d\n", QUICK_FETCH_TCP_PORT);
-				close(tcp_port_fd);
-				tcp_port_fd = -1;
+				close(tcp_listening_port_fd);
+				tcp_listening_port_fd = -1;
 			} else {
 				DEBUG("TCP port %d waiting\n", QUICK_FETCH_TCP_PORT);
 			}
