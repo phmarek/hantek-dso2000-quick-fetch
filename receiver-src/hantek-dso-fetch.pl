@@ -19,6 +19,7 @@ my $run = undef;
 
 GetOptions(
 	"cont|continuous|repeated|r|c" => \$repeated,
+	"now"      => \$now,
 	"file=s"   => \$file,
 	"run=s"    => \$run,
 	"device=s" => \$dev,
@@ -36,7 +37,10 @@ $dev ||= $dev_tcp;
 my $fetcher = open_function($dev);
 our $fh;
 
-if ($repeated) {
+if ($now) {
+	print "Immediate capture...\n";
+	&$fetcher(1);
+} elsif ($repeated) {
 	$| = 1;
 	# $SIG{"CHLD"} = "IGNORE";
 	print "Multi-capture enabled. Waiting for data.\n";
@@ -98,6 +102,7 @@ sub open_tcp
 	return undef unless $port && $dest;
 
 	return sub {
+		my($now) = @_;
 		socket(my $socket, PF_INET, SOCK_STREAM, 0)
 			or die "socket: $!";
 
@@ -105,6 +110,8 @@ sub open_tcp
 			or die "connect: $!";
 
 		binmode($socket);
+		syswrite $socket, "now\n" if $now;
+		$socket->flush();
 		alarm(2);
 		really_fetch($socket);
 		close $socket;
@@ -159,6 +166,7 @@ sub really_fetch
 
 	local $SIG{ALRM} = sub { unlink $tmpfile; die "alarm\n" };
 
+	# wait for header before determining timestamp
 	read $fh, my $header, 128;
 
 	my $output = sprintf($file, time());
@@ -338,6 +346,10 @@ Options:
   --cont
      Don't stop but loop and wait for new data,
      dump it to a CSV immediately
+
+  --now
+     Tell the DSO to return data immediately, without waiting
+     for a "Save to USB" keypress.
 
   --run=
      Specifies a shell command that is run in the background

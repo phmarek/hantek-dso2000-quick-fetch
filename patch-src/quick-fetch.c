@@ -8,6 +8,7 @@
 #include <netinet/in.h>
 #include <linux/tcp.h>
 #include <dirent.h>
+#include <ctype.h>
 #include <errno.h>
 #include <arpa/inet.h>
 #include <dlfcn.h>
@@ -73,12 +74,22 @@ static uint32_t *scpi__priv_wave_state = 0;
 static uint32_t *scpi__data_all_len = 0;
 static uint32_t *scpi__data_sum_len = 0;
 
+static uint32_t *timer_func_addr = 0;
+
 
 static int32_t *usb_mode__is_peripheral = 0;
+
+extern uint32_t anolis_add_activity_top_fun(void *);
 
 
 
 int global_debug = 0;
+uint32_t my_activity_timer_id;
+
+extern uint32_t utimer_create(uint32_t multi, uint32_t delay_msec, void(*fn)(), void* arg);
+extern uint32_t utimer_start(uint32_t id);
+extern uint32_t utimer_stop(uint32_t id);
+extern uint32_t utimer_destroy(uint32_t id);
 
 extern uint32_t anolis_make_toast(const char msg[]);
 void *_show_some_alert(void* msg) {
@@ -464,20 +475,47 @@ int is_socket_alive(int fd)
 		return 0;
 	}
 
-	DEBUG("socket %d reported with state %d\n", fd, ti.tcpi_state);
-
 	// https://unix.stackexchange.com/questions/470174/what-is-the-meaning-of-the-connection-state-constants-in-proc-net-tcp
-	return ti.tcpi_state == 1;
+	if (ti.tcpi_state == 1) {
+		return ti.tcpi_bytes_received ? 
+			ti.tcpi_bytes_received : -1;
+	}
+
+	DEBUG("socket %d reported with state %d\n", fd, ti.tcpi_state);
+	return 0;
+}
+
+int tcp_socket_active()
+{
+	return tcp_fd != -1;
+}
+
+void close_tcp_socket()
+{
+	if (tcp_socket_active()) {
+		shutdown(tcp_fd, SHUT_RDWR);
+		close(tcp_fd);
+		tcp_fd = -1;
+	}
 }
 
 
-int do_save_waveform() 
+int look_for_tcp_connection() 
 {
 	int r;
 	socklen_t len;
 	struct pollfd pfd;
 	struct sockaddr_in si;
 	char remote[INET6_ADDRSTRLEN+1];
+
+	if (tcp_socket_active()) {
+		r = is_socket_alive(tcp_fd);
+		if (r)
+			return r;
+
+		/* Close broken socket */
+		close_tcp_socket();
+	}
 
 	/* We need to loop - there might be several TCP connections
 	 * that got already closed again. */
@@ -488,13 +526,12 @@ int do_save_waveform()
 		pfd.revents = 0;
 		r = poll(&pfd, 1, 0);
 		if (!(pfd.revents & POLLIN)) {
-			DEBUG("Nothing to accept\n");
 			break;
 		}
 
 		len = sizeof(si);
 		tcp_fd = accept(tcp_listening_port_fd, &si, &len);
-		if (tcp_fd == -1)
+		if (!tcp_socket_active())
 			break;
 
 		/* TODO: ipv6? */
@@ -505,7 +542,8 @@ int do_save_waveform()
 			break;
 
 		// check for still active (ie. not closed again!)
-		if (is_socket_alive(tcp_fd)) {
+		r = is_socket_alive(tcp_fd);
+		if (r) {
 
 			// check for still active II
 			pfd.fd = tcp_fd;
@@ -515,10 +553,6 @@ int do_save_waveform()
 			if ((pfd.revents & POLLOUT) && !(pfd.revents & (POLLERR | POLLHUP))) {
 				DEBUG("got a TCP connection to write to -- fd %d, [%s]:%d\n",
 						tcp_fd, remote, ntohs(si.sin_port));
-				r = actually_do_save_waveform(tcp_fd, 0);
-				shutdown(tcp_fd, SHUT_RDWR);
-				close(tcp_fd);
-				tcp_fd = -1;
 				return r;
 			}
 
@@ -527,18 +561,100 @@ int do_save_waveform()
 		DEBUG("broken TCP connection fd %d [%s]:%d\n",
 				tcp_fd, remote, ntohs(si.sin_port));
 		// broken TCP connection
-		close(tcp_fd);
-		tcp_fd = -1;
+		close_tcp_socket();
 	}
 
-	// No valid TCP, try serial? 
-	if (ttygs0_serial_fd) {
-		DEBUG("Using serial connection on fd %d\n", ttygs0_serial_fd);
-		return actually_do_save_waveform(ttygs0_serial_fd, 1);
-	}
-
-	DEBUG("No connection available\n");
 	return 0;
+}
+
+int save_data_to_active_connection() 
+{
+	int r = -1;
+
+	if (tcp_fd != -1) {
+		r = actually_do_save_waveform(tcp_fd, 0);
+		close_tcp_socket();
+	} else
+		// No valid TCP, try serial? 
+		if (ttygs0_serial_fd) {
+			DEBUG("Using serial connection on fd %d\n", ttygs0_serial_fd);
+			r = actually_do_save_waveform(ttygs0_serial_fd, 1);
+		} else
+			DEBUG("No connection available\n");
+
+	return r;
+}
+
+void interpret_command(int fd, char *cmd)
+{
+	const char thanks[] = "thx\r\n";
+
+	/* Careful: common prefixes! */
+	if (strncmp(cmd, "now", 3) == 0) {
+		DEBUG("data dump requested.\n");
+		save_data_to_active_connection();
+		/* No thanks, might mess up data communication! */
+		return;
+	}
+	if (strncmp(cmd, "time", 4) == 0) {
+		struct timespec clk = { .tv_sec = strtoul(cmd+4, NULL, 10), .tv_nsec = 0};
+		DEBUG("got clock time %ld\n", (long)clk.tv_sec);
+		if (clk.tv_sec)
+			clock_settime(CLOCK_REALTIME, &clk);
+		goto thx;
+	}
+	/* TODO: scpi */
+
+	return;
+
+thx:
+	write(fd, thanks, sizeof(thanks));
+	return;
+}
+
+void my_activity() {
+	char buffer[128], *cp, *start, *end;
+	int r, first = 0;
+	struct pollfd pfd;
+
+	buffer[sizeof(buffer)-1] = 0;
+
+	if (look_for_tcp_connection()) {
+
+		/* Only one command allowed now,
+		 * but prepare for getting multiple at once. */
+		start = buffer + first;
+
+		r = recvfrom(tcp_fd, 
+				start,
+				sizeof(buffer) - first -1,
+				MSG_DONTWAIT,
+				NULL, NULL);
+
+		if (r == -1) {
+			if ( errno == EAGAIN || errno == EWOULDBLOCK)
+				return;
+
+			DEBUG("Error on TCP read: %d", errno);
+			close_tcp_socket();
+			return;
+		}
+		if (r == 0)
+			return;
+
+		end = start + r;
+		while (isspace(*start))
+			start++;
+
+		cp = strchr(start, '\r');
+		if (!cp)
+			cp = strchr(start, '\n');
+		if (cp) {
+			*cp = 0;
+			DEBUG("receive from TCP: %d, %d; %s\n", r, errno, start);
+			interpret_command(tcp_fd, start);
+		}
+	}
 }
 
 
@@ -546,6 +662,8 @@ int new_save_to_usb(void *x)
 {
 	static time_t pressed_time;
 	static int pressed_count = 0;
+	struct sockaddr_in si = { 0 };
+	int ret;
 
 	/* Check for USB connection to PC */
 	if (*usb_mode__is_peripheral == 0) {
@@ -573,6 +691,18 @@ int new_save_to_usb(void *x)
 					close(ttygs0_serial_fd);
 				ttygs0_serial_fd = -1;
 				show_some_alert_async("Leaving quick fetch mode.");
+
+				if (tcp_listening_port_fd != -1) {
+					close(tcp_listening_port_fd);
+					tcp_listening_port_fd = -1;
+				}
+
+				if (my_activity_timer_id) {
+					utimer_stop(my_activity_timer_id);
+					utimer_destroy(my_activity_timer_id);
+					my_activity_timer_id = 0;
+				}
+
 				return 0;
 			}
 			/* Unless it was the third time in quick succession, return data. */
@@ -583,7 +713,7 @@ int new_save_to_usb(void *x)
 		}
 
 		/* Only reset when successful. */
-		if (do_save_waveform())
+		if (save_data_to_active_connection())
 			pressed_count = 0;
 	} else {
 		/* Console is active; stop it (so that it doesn't get restarted by init) and ... */
@@ -598,7 +728,37 @@ int new_save_to_usb(void *x)
 		ttygs0_serial_fd = open(communication_port, O_RDWR);
 		//		write(ttygs0_serial_fd, init_msg, strlen(init_msg));
 		/* TODO: start thread that waits for commands ?! */
-		/* TODO: Message to screen saying now active */
+
+		tcp_listening_port_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+		if (tcp_listening_port_fd != -1) {
+			si.sin_family = AF_INET;
+			// si.sin_addr  is 0.0.0.0
+			si.sin_port = htons(QUICK_FETCH_TCP_PORT);
+
+			ret = bind(tcp_listening_port_fd, &si, sizeof(si));
+			if (ret != 0) {
+				DEBUG("Can't bind TCP port %d\n", QUICK_FETCH_TCP_PORT);
+				close(tcp_listening_port_fd);
+				tcp_listening_port_fd = -1;
+			} else {
+				// Multiple connections could be waiting if the client was aborted!!
+				ret = listen(tcp_listening_port_fd, 10);
+				if (ret != 0) {
+					DEBUG("Can't listen on TCP port %d\n", QUICK_FETCH_TCP_PORT);
+					close(tcp_listening_port_fd);
+					tcp_listening_port_fd = -1;
+				} else {
+					DEBUG("TCP port %d waiting\n", QUICK_FETCH_TCP_PORT);
+				}
+			}
+		}
+
+		if (!my_activity_timer_id) {
+			/* This says how quickly we react to TCP commands. */
+			my_activity_timer_id = utimer_create(1, 50, my_activity, NULL);
+			utimer_start(my_activity_timer_id);
+			DEBUG("Started timer id 0x%x\n", my_activity_timer_id);
+		}
 	}
 
 	return 1;
@@ -694,6 +854,7 @@ int detect()
 		scpi__data_all_len      = (void*)0x9aed7c;
 		scpi__data_sum_len      = (void*)0x9a645c;
 		usb_mode__is_peripheral = (void*)0x9aed4c;
+		timer_func_addr         = (void*)0x34cd8;
 
 		return 3;
 	}
@@ -714,6 +875,7 @@ int detect()
 		scpi__data_all_len      = (void*)0x9bddac;
 		scpi__data_sum_len      = (void*)0x9b548c;
 		usb_mode__is_peripheral = (void*)0x9bdd7c;
+		timer_func_addr         = (void*)0x34d54;
 
 		return 2;
 	}
@@ -740,7 +902,7 @@ void *patch_init_delayed(void * ignore)
 	 * At this point after reboot, just a newly started getty. */
 	send_signal_to_console_processes(communication_port, SIGKILL);
 
-	signal(SIGPOLL, (void*)do_save_waveform);
+	signal(SIGPOLL, (void*)save_data_to_active_connection);
 	/* Auto reap children */
 	signal(SIGCHLD, SIG_DFL);
 	signal(SIGUSR2, switch_debug_output);
@@ -756,7 +918,6 @@ void *patch_init_delayed(void * ignore)
 void my_patch_init(int version) {
 	int fh;
 	pthread_t thr;
-	struct sockaddr_in si = { 0 };
 	int ret;
 
 	if (did_patch)
@@ -834,30 +995,6 @@ void my_patch_init(int version) {
 	}
 	if (0 == pthread_create(&thr, NULL, push_mcast_packets, NULL)) {
 		pthread_detach(thr);
-	}
-
-	tcp_listening_port_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
-	if (tcp_listening_port_fd != -1) {
-		si.sin_family = AF_INET;
-		// si.sin_addr  is 0.0.0.0
-		si.sin_port = htons(QUICK_FETCH_TCP_PORT);
-
-		ret = bind(tcp_listening_port_fd, &si, sizeof(si));
-		if (ret != 0) {
-			DEBUG("Can't bind TCP port %d\n", QUICK_FETCH_TCP_PORT);
-			close(tcp_listening_port_fd);
-			tcp_listening_port_fd = -1;
-		} else {
-			// Multiple connections could be waiting if the client was aborted!!
-			ret = listen(tcp_listening_port_fd, 10);
-			if (ret != 0) {
-				DEBUG("Can't listen on TCP port %d\n", QUICK_FETCH_TCP_PORT);
-				close(tcp_listening_port_fd);
-				tcp_listening_port_fd = -1;
-			} else {
-				DEBUG("TCP port %d waiting\n", QUICK_FETCH_TCP_PORT);
-			}
-		}
 	}
 
 	return;
