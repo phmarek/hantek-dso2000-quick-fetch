@@ -68,7 +68,6 @@ struct connection {
 
 
 static uint32_t save_to_usb_no_udisk_beq = 0;
-static uint32_t save_to_usb_code_space = 0;
 static uint32_t (*scpi__priv_wave_d_all)(struct connection*) = 0;
 static uint32_t *scpi__priv_wave_state = 0;
 static uint32_t *scpi__data_all_len = 0;
@@ -846,7 +845,6 @@ int detect()
 			DEBUG("wrong bytes at %p!! 0x%x\n", ptr, *ptr);
 			return 0;
 		}
-		save_to_usb_code_space = 0x344fc;
 
 		scpi__priv_wave_d_all   = (void*)0x93938;
 		scpi__priv_wave_state   = (void*)0xe1604;
@@ -865,7 +863,6 @@ int detect()
 			DEBUG("wrong bytes at %p!! 0x%x\n", ptr, *ptr);
 			return 0;
 		}
-		save_to_usb_code_space = 0x34578;
 
 		scpi__priv_wave_d_all   = (void*)0x93970;
 		scpi__priv_wave_state   = (void*)0xf0648;
@@ -910,6 +907,20 @@ void *patch_init_delayed(void * ignore)
 
 #include "mdns.c"
 
+/* Fix up stack: We need to fix the pushed registers, and the local variables.
+ * anolis_is_udisk_mounted() changes R0 and R3, which wouldn't matter;
+ * but the call changes LR which we need to restore, so just adding to SP
+ * isn't enough.
+ */
+const char save_to_usb__stack_cleanup[]
+	__attribute__ ((aligned (8))) 
+	__attribute__ ((section (".text")))
+	= {
+	0x8d, 0xdf, 0x8d, 0xe2,    // add   sp,sp,#0x234
+	0xf0, 0x43, 0xbd, 0xe8,    // ldmia sp!, {r4, r5, r6, r7, r8, r9, lr}
+	  0x00, 0x00, 0x00, 0x00, //     b new_save_to_usb */
+};
+
 void my_patch_init(int version) {
 	int fh;
 	pthread_t thr;
@@ -925,24 +936,10 @@ void my_patch_init(int version) {
 	// We patch the code immediately before it's being used... */
 
 	/* "Save to USB" key: If no USB stick present, use the new code to save to a PC. */
-	/* Fix up stack: We need to fix the pushed registers, and the local variables.
-	 * anolis_is_udisk_mounted() changes R0 and R3, which wouldn't matter;
-	 * but the call changes LR which we need to restore, so just adding to SP
-	 * isn't enough.
-	 * And the error path comes in here, too, so there's not enough space for
-	 * an LDMIA, an ADD, and a jump.
-	 *
-	 * But in the same functions there's a check for the display;
-	 * on this embedded system, I don't think this will ever trigger, so we
-	 * reuse that space. 
-	 *     beq space */
-	patch_a_jump(fh, (void*)save_to_usb_code_space, save_to_usb_no_udisk_beq, OPCODE_IF_EQU_JUMP);
-	/* 	   add   sp,sp,#0x234
-	 *     ldmia sp!, {r4, r5, r6, r7, r8, r9, lr}
-	 *     b new_save_to_usb */
-	patch_a_code(fh, 0xe28ddf8d,      save_to_usb_code_space +0);
-	patch_a_code(fh, 0xe8bd43f0,      save_to_usb_code_space +4);
-	patch_a_jump(fh, new_save_to_usb, save_to_usb_code_space +8, OPCODE_UNCOND_JUMP);
+	/* beq to stack cleanup */
+	patch_a_jump(fh, (void*)save_to_usb__stack_cleanup, save_to_usb_no_udisk_beq, OPCODE_IF_EQU_JUMP);
+	/* Jump to our code */
+	patch_a_jump(fh, new_save_to_usb, (uint32_t)save_to_usb__stack_cleanup +8, OPCODE_UNCOND_JUMP);
 
 	switch (version) {
 		case 2:
