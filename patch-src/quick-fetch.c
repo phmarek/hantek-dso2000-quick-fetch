@@ -963,7 +963,8 @@ void my_patch_init(int version) {
 			 *   0006a054 ee ff ff ea    b    LAB_0006a014
 			 *
 			 * Yeah, we could move the ADD up and write a single jump.
-			 */			patch_a_jump(fh, (void*)0x6a09c, 0x6a090, OPCODE_UNCOND_JUMP);
+			 */
+			patch_a_jump(fh, (void*)0x6a09c, 0x6a090, OPCODE_UNCOND_JUMP);
 			patch_a_jump(fh, (void*)0x6a064, 0x6a0a0, OPCODE_UNCOND_JUMP);
 
 			patch_a_jump(fh, (void*)0x6a1a4, 0x6a1a0, OPCODE_UNCOND_JUMP);
