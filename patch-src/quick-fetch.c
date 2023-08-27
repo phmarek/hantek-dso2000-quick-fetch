@@ -74,7 +74,6 @@ static uint32_t *scpi__priv_wave_state = 0;
 static uint32_t *scpi__data_all_len = 0;
 static uint32_t *scpi__data_sum_len = 0;
 
-static uint32_t *timer_func_addr = 0;
 
 
 static int32_t *usb_mode__is_peripheral = 0;
@@ -854,8 +853,6 @@ int detect()
 		scpi__data_all_len      = (void*)0x9aed7c;
 		scpi__data_sum_len      = (void*)0x9a645c;
 		usb_mode__is_peripheral = (void*)0x9aed4c;
-		timer_func_addr         = (void*)0x34cd8;
-
 		return 3;
 	}
 
@@ -875,8 +872,6 @@ int detect()
 		scpi__data_all_len      = (void*)0x9bddac;
 		scpi__data_sum_len      = (void*)0x9b548c;
 		usb_mode__is_peripheral = (void*)0x9bdd7c;
-		timer_func_addr         = (void*)0x34d54;
-
 		return 2;
 	}
 
