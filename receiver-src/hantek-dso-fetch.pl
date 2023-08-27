@@ -110,9 +110,14 @@ sub open_tcp
 			or die "connect: $!";
 
 		binmode($socket);
-		syswrite $socket, "now\n" if $now;
-		$socket->flush();
-		alarm(2);
+		if ($now) {
+			syswrite $socket, "now\n";
+			$socket->flush();
+			alarm(2);
+		} else {
+			# No timeout here, we need to wait for the "Save to USB" keypress!
+			alarm(0);
+		}
 		really_fetch($socket);
 		close $socket;
 	};
