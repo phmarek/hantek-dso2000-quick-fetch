@@ -846,7 +846,7 @@ int detect()
 			return 0;
 		}
 
-		scpi__priv_wave_d_all   = (void*)0x93938;
+		scpi__priv_wave_d_all   = (void*)0x93934;
 		scpi__priv_wave_state   = (void*)0xe1604;
 		scpi__data_all_len      = (void*)0x9aed7c;
 		scpi__data_sum_len      = (void*)0x9a645c;
@@ -864,7 +864,7 @@ int detect()
 			return 0;
 		}
 
-		scpi__priv_wave_d_all   = (void*)0x93970;
+		scpi__priv_wave_d_all   = (void*)0x9396c;
 		scpi__priv_wave_state   = (void*)0xf0648;
 		scpi__data_all_len      = (void*)0x9bddac;
 		scpi__data_sum_len      = (void*)0x9b548c;
