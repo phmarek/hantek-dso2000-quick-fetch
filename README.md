@@ -6,9 +6,9 @@ Here is a C file that compiles to a shared library which, if `LD_PRELOAD`ed to t
 
 # Compatibility
 
-Currently, this patch only works for the `2022-07-27` version of the firmware (the (currently) latest one).
+Currently, this patch only works for the `2022-07-27` and the `2023-03-27` version of the firmware (the two latest ones).
 
-The patch checks the binary for a few signature bytes (eg. the firmware string `"2.0.0(220517.00)"`), so it should be fairly safe - it should just not patch anything on the wrong version, and not break anything.
+The patch checks the binary for a few signature bytes (eg. the firmware string `"3.0.0(230327.00)"`), so it should be fairly safe - it should just not patch anything on the wrong version, and not break anything.
 
 # Usage
 
@@ -32,6 +32,7 @@ If your script isn't running when you press the button, you'll see a notificatio
 ## Parameters
 
 - `--cont` makes the script wait for multiple data transfers; without that, it will only fetch one.
+- `--now` tells the script to immediately fetch a dump, ie. to not wait for a `SAVE TO USB` key press. This is currently implemented only with USB IP connections.
 - `--file` (or just another argument) specifies where to save the CSV; a `%d` will be replaced by the (unix) timestamp, so that multiple transfers won't collide with each other.
 - `--sep` defaults to a `Tab`; by using a comma (`,`) you could get a "real" CSV (which I wouldn't recommend - comma vs. decimal point is likely to go wrong in your spreadsheet or data analysis software.)
 - `--device` allows you to switch to another USB serial device instead of `/dev/ttyACM0`.
@@ -84,6 +85,8 @@ No problem. Just don't press the `SAVE TO USB` button after booting the DSO (the
 
 Pressing the button once more will switch to the quick fetch functionality and so will stop your USB console again.
 
+Another (better!) way is to use /DavidAlfa/s kernel image that supports USB networking - then you can let the script fetch data via IP, and can SSH into the DSO in parallel!
+
 # *Manual* Installation
 
 *BE CAREFUL -- YOU NEED TO KNOW WHAT YOU'RE DOING! YOU CAN BRICK YOUR DSO IF YOU DO SOMETHING STUPID!*
@@ -134,3 +137,5 @@ and install `gcc-9-cross-base=9.5.0-1cross1`, `libc6-armel-cross=2.33-1cross1`, 
 A previous version used the USB storage interface for transferring data; but that precluded using the USB console, and had a longer latency because the data needed full preparation on the DSO before being transferred to the PC.
 
 The current solution just does the DSO and local CSV printing in parallel and is therefore faster.
+
+Furthermore, I suggest switching the kernel image - /DavidAlfa/ has one that also supports USB networking, so you can SSH into the DSO!
