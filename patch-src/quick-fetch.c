@@ -921,6 +921,17 @@ const char save_to_usb__stack_cleanup[]
 	  0x00, 0x00, 0x00, 0x00, //     b new_save_to_usb */
 };
 
+unsigned char my_sync_and_close_rev3[] = {
+	// @ 0006a104 
+     0x38, 0x00, 0x95, 0xe5,   //  ldr r0, [r5, #x38]
+     0xcb, 0xdb, 0x25, 0xeb,   //  bl  <EXTERNAL>::fsync
+     0x05, 0x00, 0xa0, 0xe1,   //  cpy r0,r5
+     0x8f, 0xdd, 0x25, 0xeb,   //  bl  <EXTERNAL>::fclose  ; int fclose(FILE * __stream)
+     0x07, 0x00, 0xa0, 0xe1,   //  cpy r0,r7
+     0x24, 0x70, 0xa0, 0xe3,   //  mov r7,#0x24
+     0x00, 0x00, 0x00, 0xef    //  swi 0x0                 ; syscall sync()
+};
+
 void my_patch_init(int version) {
 	int fh;
 	pthread_t thr;
@@ -974,10 +985,10 @@ void my_patch_init(int version) {
 			patch_a_jump(fh, (void*)0x93a18, 0x93a0c, OPCODE_UNCOND_JUMP);
 			patch_a_jump(fh, (void*)0x93a60, 0x93a48, OPCODE_UNCOND_JUMP);
 
+			pwrite(fh, my_sync_and_close_rev3, sizeof(my_sync_and_close_rev3), 0x6a104);
 			patch_a_jump(fh, (void*)0x6a04c, 0x6a040, OPCODE_UNCOND_JUMP);
 			patch_a_jump(fh, (void*)0x6a014, 0x6a050, OPCODE_UNCOND_JUMP);
 
-			patch_a_jump(fh, (void*)0x6a154, 0x6a150, OPCODE_UNCOND_JUMP);
 			break;
 	}
 	close(fh);
