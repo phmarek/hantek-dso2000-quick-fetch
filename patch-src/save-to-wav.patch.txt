@@ -1,0 +1,94 @@
+
+OLD:
+        0006a0fc 10 00 8d e2                   add        r0,sp,#0x10
+        0006a100 3e c1 fe eb                   bl         <EXTERNAL>::fwrite                               size_t fwrite(void * __ptr, size
+        0006a104 05 00 a0 e1                   cpy        r0,r5
+        0006a108 90 c1 fe eb                   bl         <EXTERNAL>::fclose                               int fclose(FILE * __stream)
+        0006a10c 60 00 9f e5                   ldr        r0=>DAT_000c60dc,[PTR_DAT_0006a174]              = 000c60dc
+        .                                                                                                  = 73h    s
+        0006a110 3c bf fe eb                   bl         <EXTERNAL>::system                               int system(char * __command)
+        0006a114 01 00 a0 e3                   mov        r0,#0x1
+        0006a118 8d c0 fe eb                   bl         <EXTERNAL>::sleep                                uint sleep(uint __seconds)
+        0006a11c 07 00 a0 e1                   cpy        r0,r7
+        0006a120 8b 62 ff eb                   bl         destroy_wave_data_buffer_vec                     undefined destroy_wave_data_buff
+
+
+NEW:
+        0006a0fc 10 00 8d e2                   add        r0,sp,#0x10
+        0006a100 3e c1 fe eb                   bl         <EXTERNAL>::fwrite                               size_t fwrite(void * __ptr, size
+        0006a104 05 00 a0 e1                   cpy        r0,r5
+        0006a108 90 c1 fe eb                   bl         <EXTERNAL>::fclose                               int fclose(FILE * __stream)
+     P  0006a10c 07 10 a0 e1                   cpy        r1,r7
+     P  0006a110 24 70 a0 e3                   mov        r7,#0x24
+     P  0006a114 00 00 00 ef                   swi        0x0                                              syscall sync()
+     P  0006a118 01 70 a0 e1                   cpy        r7,r1
+        0006a11c 07 00 a0 e1                   cpy        r0,r7
+        0006a120 8b 62 ff eb                   bl         destroy_wave_data_buffer_vec                     undefined destroy_wave_data_buff
+
+
+Dump of assembler code from 0x6a0f0 to 0x6a180:
+   0x0006a0f0:  mov     r3, r5
+   0x0006a0f4:  mov     r2, #1
+   0x0006a0f8:  mov     r1, #344        ; 0x158
+   0x0006a0fc:  add     r0, sp, #16
+   0x0006a100:  bl      0x1a600 <fwrite@plt>
+   0x0006a104:  ldr     r0, [r5, #56]   ; 0x38
+   0x0006a108:  bl      0x9e103c
+   0x0006a10c:  mov     r0, r5
+   0x0006a110:  bl      0x9e1754
+   0x0006a114:  mov     r0, r7
+   0x0006a118:  mov     r7, #36 ; 0x24
+   0x0006a11c:  svc     0x00000000
+   0x0006a120:  bl      0x42b54
+   0x0006a124:  mov     r0, #10
+   0x0006a128:  bl      0x69ef4
+   0x0006a12c:  ldr     r1, [pc, #60]   ; 0x6a170
+   0x0006a130:  mov     r0, #0
+   0x0006a134:  bl      0x20f58
+   0x0006a138:  mov     r0, #0
+   0x0006a13c:  add     sp, sp, #364    ; 0x16c
+   0x0006a140:  pop     {r4, r5, r6, r7, r8, r9, r10, r11, pc}
+   0x0006a144:  str     r8, [r6, #80]   ; 0x50
+   0x0006a148:  add     r4, r4, #4
+   0x0006a14c:  mov     r0, #5
+   0x0006a150:  bl      0x69ef4
+   0x0006a154:  cmp     r4, r10
+   0x0006a158:  add     r6, r6, #64     ; 0x40
+   0x0006a15c:  bne     0x69ff4
+   0x0006a160:  b       0x6a0bc
+   0x0006a164:  mvn     r0, #0
+   0x0006a168:  b       0x6a13c
+   0x0006a16c:  andeq   r6, r12, r8, ror r11
+   0x0006a170:  andeq   r7, r12, r4, lsr r10
+   0x0006a174:  ldrdeq  r6, [r12], -r12
+   0x0006a178:  eorsne  r5, r4, #120, 12        ; 0x7800000
+   0x0006a17c:  push    {r4, r5, r6, lr}
+
+
+        000435f4 01 5c ff eb                   bl         <EXTERNAL>::fwrite                               size_t fwrite(void * __ptr, size
+        000435f8 04 00 a0 e1                   cpy        r0,r4
+        000435fc 1c 5d ff eb                   bl         <EXTERNAL>::fflush                               int fflush(FILE * __stream)
+        00043600 04 00 a0 e1                   cpy        r0,r4
+        00043604 95 5a ff eb                   bl         <EXTERNAL>::fileno                               int fileno(FILE * __stream)
+        00043608 fe 56 ff eb                   bl         <EXTERNAL>::fsync                                int fsync(int __fd)
+        0004360c 04 00 a0 e1                   cpy        r0,r4
+        00043610 4e 5c ff eb                   bl         <EXTERNAL>::fclose                               int fclose(FILE * __stream)
+        00043614 01 00 a0 e3                   mov        r0,#0x1
+        00043618 42 df 8d e2                   add        sp,sp,#0x108
+        0004361c 70 80 bd e8                   ldmia      sp!,{r4 r5 r6 pc}
+
+
+BROKEN:
+libc might still have data unflushed on fsync before fclose
+        0006a0fc 10 00 8d e2                   add        r0,sp,#0x10
+        0006a100 3e c1 fe eb                   bl         <EXTERNAL>::fwrite                               size_t fwrite(void * __ptr, size
+     P  0006a104 38 00 95 e5                   ldr        r0, [r5, #x38]
+     P  0006a108 cb db 25 eb                   bl         <EXTERNAL>::fsync
+     P  0006a10c 05 00 a0 e1                   cpy        r0,r5
+     P  0006a110 8f dd 25 eb                   bl         <EXTERNAL>::fclose                               int fclose(FILE * __stream)
+     P  0006a114 07 00 a0 e1                   cpy        r0,r7
+     P  0006a118 24 70 a0 e3                   mov        r7,#0x24
+     P  0006a11c 00 00 00 ef                   swi        0x0                                              syscall sync()
+        0006a120 8b 62 ff eb                   bl         destroy_wave_data_buffer_vec                     undefined destroy_wave_data_buff
+
+
