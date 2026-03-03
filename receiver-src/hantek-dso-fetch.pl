@@ -22,7 +22,7 @@ GetOptions(
 	"now"      => \$now,
 	"file=s"   => \$file,
 	"run=s"    => \$run,
-	"device=s" => \$dev,
+	"dev|device=s" => \$dev,
 	"sep=s"    => \$sep,
 	"debug+"   => \$debug) or die(<DATA>);
 
@@ -126,19 +126,33 @@ sub open_tcp
 sub open_function
 {
 	my($dev) = @_;
-	
+
+	if ($dev =~ /\.lwf$/i && -f $dev) {
+		# A plain file gets converted.
+		warn "File conversion is once-only.\n" if $repeated;
+		$repeated = 0;
+
+		my $fh;
+		open($fh, "<", $dev) or die "Can't open '$dev': $!";
+		binmode($fh);
+		return sub {
+			really_fetch($fh);
+		};
+	}
+
 	my $f = open_tcp($dev);
 	if ($f) {
 		return $f;
+	}
 
-	} elsif ($dev =~ m,^/dev/tty,) {
+	if ($dev =~ m,^/dev/tty,) {
 		my $fh = open_serial($dev);
 		return sub {
 			fetch_serial($fh);
 		};
-	} else {
-		die "Bad device '$dev'\n";
 	}
+
+	die "Bad device '$dev'\n";
 }
 
 
@@ -194,7 +208,7 @@ sub really_fetch
 	# TODO: signed LE short not available? For the offsets.
 	# pack
 
-	die "Wrong magic: $header" unless $head eq '#9';
+	die "Wrong magic:" . join("", map { sprintf(" %02x", $_) } unpack("C*", $header)) unless $head eq '#9';
 
 	my @channels;
 	my @calc;
@@ -254,7 +268,7 @@ sub really_fetch
 		if ($i == $chunk_start) {
 			# Fetch a set of data chunks
 			for my $ch (@channels) {
-				alarm(1);
+				alarm(2);
 				my $read = read($fh, my $chunk, $chunk_size);
 				last if $read == 0;
 				die "error reading: $!" if !defined($read);
