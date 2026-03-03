@@ -824,7 +824,7 @@ int detect()
 	const char v200_202205[] = "2.0.0(220517.00)";
 	const char v200_202210[] = "2.0.0(221028.00)";
 	const char v300_202303[] = "3.0.0(230327.00)";
-
+	const char v301_202504[] = "3.0.1(250418.00)";
 
 	buffer[0] = 0;
 	i = readlink("/proc/self/exe", buffer, sizeof(buffer)-1);
@@ -1005,6 +1005,16 @@ void my_patch_init(int version) {
 
 			pwrite(fh, do_an_sync, sizeof(do_an_sync), 0x6a10c);
 			break;
+		case 4:
+			patch_a_jump(fh, 0x93aac, 0x93a9c, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, 0x93714, 0x93708, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, 0x9375c, 0x93744, OPCODE_UNCOND_JUMP);
+
+			patch_a_jump(fh, 0x69f90, 0x69f84, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, 0x69f58, 0x69f94, OPCODE_UNCOND_JUMP);
+
+			pwrite(fh, do_an_sync, sizeof(do_an_sync), 0x6a050);
+
 	}
 	close(fh);
 	did_patch = 1;
