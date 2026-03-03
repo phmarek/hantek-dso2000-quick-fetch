@@ -787,7 +787,7 @@ int patch_a_code(int fh, uint32_t my_code, uint32_t patch_addr)
 }
 
 
-int patch_a_jump(int fh, void* my_addr, uint32_t patch_addr, int opcode)
+int patch_a_jump(int fh, uint32_t my_addr, uint32_t patch_addr, int opcode)
 {
 	int64_t dist;
 	uint32_t jmp_val;
@@ -799,7 +799,7 @@ int patch_a_jump(int fh, void* my_addr, uint32_t patch_addr, int opcode)
 	 * + 4                  (IP increment)
 	 * */
 
-	dist = ((unsigned long)my_addr - 4 - (patch_addr + 4));
+	dist = (my_addr - 4 - (patch_addr + 4));
 	jmp_val = (unsigned long)dist / 4;
 	DEBUG("fh %d, from %p jump to %p, dist 0x%llx, jmp 0x%x\n",
 			fh, patch_addr, my_addr, dist, jmp_val);
@@ -835,6 +835,24 @@ int detect()
 	}
 
 	DEBUG("right exe: %s\n", buffer);
+
+	if (strncmp((void*)0xc5c40, v301_202504, sizeof(v301_202504)) == 0) {
+		DEBUG("found %s\n", v301_202504);
+
+		save_to_usb_no_udisk_beq = 0x343ac;
+		ptr = (void*)save_to_usb_no_udisk_beq;
+		if (*ptr != 0x0a000078) {
+			DEBUG("wrong bytes at %p!! 0x%x\n", ptr, *ptr);
+			return 0;
+		}
+
+		scpi__priv_wave_d_all   = (void*)0x93630;
+		scpi__priv_wave_state   = (void*)0xe1610;
+		scpi__data_all_len      = (void*)0x9aed9c;
+		scpi__data_sum_len      = (void*)0x9a647c;
+		usb_mode__is_peripheral = (void*)0x9aed6c;
+		return 4;
+	}
 
 	if (strncmp((void*)0xc5f28, v300_202303, sizeof(v300_202303)) == 0) {
 		DEBUG("found %s\n", v300_202303);
@@ -945,16 +963,16 @@ void my_patch_init(int version) {
 
 	/* "Save to USB" key: If no USB stick present, use the new code to save to a PC. */
 	/* beq to stack cleanup */
-	patch_a_jump(fh, (void*)save_to_usb__stack_cleanup, save_to_usb_no_udisk_beq, OPCODE_IF_EQU_JUMP);
+	patch_a_jump(fh, (uint32_t)save_to_usb__stack_cleanup, save_to_usb_no_udisk_beq, OPCODE_IF_EQU_JUMP);
 	/* Jump to our code */
-	patch_a_jump(fh, new_save_to_usb, (uint32_t)save_to_usb__stack_cleanup +8, OPCODE_UNCOND_JUMP);
+	patch_a_jump(fh, (uint32_t)new_save_to_usb, (uint32_t)save_to_usb__stack_cleanup +8, OPCODE_UNCOND_JUMP);
 
 	switch (version) {
 		case 2:
 			/* Remove debug output - that being written to the serial console slows everything down. */
-			patch_a_jump(fh, (void*)0x93de8, 0x93dd8, OPCODE_UNCOND_JUMP);
-			patch_a_jump(fh, (void*)0x93a50, 0x93a44, OPCODE_UNCOND_JUMP);
-			patch_a_jump(fh, (void*)0x93a98, 0x93a80, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, 0x93de8, 0x93dd8, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, 0x93a50, 0x93a44, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, 0x93a98, 0x93a80, OPCODE_UNCOND_JUMP);
 
 			/* Patch slowdown during LWF file write to USB stick
 			 *   0006a03c 5e c1 fe eb    bl   <EXTERNAL>::fwrite                               size_t fwrite(void * __ptr, size
@@ -972,18 +990,18 @@ void my_patch_init(int version) {
 			 *
 			 * Yeah, we could move the ADD up and write a single jump.
 			 */
-			patch_a_jump(fh, (void*)0x6a09c, 0x6a090, OPCODE_UNCOND_JUMP);
-			patch_a_jump(fh, (void*)0x6a064, 0x6a0a0, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, 0x6a09c, 0x6a090, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, 0x6a064, 0x6a0a0, OPCODE_UNCOND_JUMP);
 
-			patch_a_jump(fh, (void*)0x6a1a4, 0x6a1a0, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, 0x6a1a4, 0x6a1a0, OPCODE_UNCOND_JUMP);
 			break;
 		case 3:
-			patch_a_jump(fh, (void*)0x93db0, 0x93da0, OPCODE_UNCOND_JUMP);
-			patch_a_jump(fh, (void*)0x93a18, 0x93a0c, OPCODE_UNCOND_JUMP);
-			patch_a_jump(fh, (void*)0x93a60, 0x93a48, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, 0x93db0, 0x93da0, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, 0x93a18, 0x93a0c, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, 0x93a60, 0x93a48, OPCODE_UNCOND_JUMP);
 
-			patch_a_jump(fh, (void*)0x6a04c, 0x6a040, OPCODE_UNCOND_JUMP);
-			patch_a_jump(fh, (void*)0x6a014, 0x6a050, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, 0x6a04c, 0x6a040, OPCODE_UNCOND_JUMP);
+			patch_a_jump(fh, 0x6a014, 0x6a050, OPCODE_UNCOND_JUMP);
 
 			pwrite(fh, do_an_sync, sizeof(do_an_sync), 0x6a10c);
 			break;
