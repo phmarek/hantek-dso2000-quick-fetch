@@ -139,6 +139,7 @@ A previous version used the USB storage interface for transferring data; but tha
 The current solution just does the DSO and local CSV printing in parallel and is therefore faster.
 
 Furthermore, I suggest switching the kernel image - /DavidAlfa/ has one that also supports USB networking, so you can SSH into the DSO!
-With that kernel image you can connect via TCP to the `quick-fetch` patch; there's a [Pulseview/`libsigrok`](https://sigrok.org/wiki/Main_Page) driver being prepared:
+With that kernel image you can connect via TCP to the `quick-fetch` patch; there's a [Pulseview/`libsigrok`](https://sigrok.org/wiki/Main_Page) driver
+[being prepared](https://github.com/sigrokproject/libsigrok/compare/master...phmarek:libsigrok:master):
 
 ![Pulseview screenshot](images/pulseview.png)
